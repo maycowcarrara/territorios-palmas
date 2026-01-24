@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ajuste para o mapa ocupar a tela toda depois */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Remove o fundo branco padrão dos números nas bolinhas */
+.leaflet-tooltip.sem-fundo {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: white !important; /* Garante que o número seja branco */
+  font-weight: bold;
+  font-size: 1.1rem; /* Número um pouco maior */
+}
