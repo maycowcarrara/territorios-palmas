@@ -1,16 +1,16 @@
 {
   "name": "territorios-palmas",
   "private": true,
-  "version": "0.0.0",
-  "homepage": "https://maycowcarrara.github.io/territorios-palmas",  // <--- 1. ADICIONE ISSO
+  "version": "1.0.32",
+  "homepage": "https://maycowcarrara.github.io/territorios-palmas",  
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "predeploy": "npm run build",      // <--- 2. ADICIONE ISSO
-    "deploy": "gh-pages -d dist"       // <--- 3. ADICIONE ISSO
+    "predeploy": "npm run build",      
+    "deploy": "gh-pages -d dist"       
   },
   "dependencies": {
     "firebase": "^12.8.0",
