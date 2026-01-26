@@ -7,6 +7,7 @@ import { useUsuario } from './useUsuario';
 import AdminPanel from './AdminPanel';
 import Relatorios from './Relatorios'; 
 import appInfo from './version.json';
+import AutoUpdate from './AutoUpdate';
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 // Isso garante que pegamos o evento mesmo antes do React renderizar qualquer coisa
@@ -393,6 +394,7 @@ function Dashboard() {
 function App() {
   return (
     <HashRouter>
+      <AutoUpdate />
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/app" element={<Dashboard />} />

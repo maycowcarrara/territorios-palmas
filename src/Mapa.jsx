@@ -75,8 +75,34 @@ const ControlesNavegacao = ({ setPosicaoUsuario }) => {
 
 const MarcadorUsuario = ({ posicao }) => {
     if (!posicao) return null;
+
+    // Função para compartilhar a localização atual
+    const compartilharLocalizacao = () => {
+        // CORREÇÃO: Link padrão universal do Google Maps
+        const linkGoogle = `https://www.google.com/maps?q=${posicao.lat},${posicao.lng}`;
+        const texto = `*Estou aqui:*\n\n${linkGoogle}`;
+        const textoEncoded = encodeURIComponent(texto);
+        window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
+    };
+
     const iconeGPS = L.divIcon({ className: 'bg-transparent', html: `<div class="flex items-center justify-center relative w-16 h-16 -ml-4 -mt-4"><div class="absolute w-12 h-12 bg-blue-500/30 rounded-full animate-pulse"></div><div class="relative w-5 h-5 bg-blue-600 border-[3px] border-white rounded-full shadow-lg z-10"></div></div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
-    return <Marker position={posicao} icon={iconeGPS}><Popup>Você está aqui</Popup></Marker>;
+
+    return (
+        <Marker position={posicao} icon={iconeGPS}>
+            <Popup>
+                <div className="text-center p-1">
+                    <p className="font-bold text-sm mb-2 text-gray-700">Você está aqui</p>
+                    <button
+                        onClick={compartilharLocalizacao}
+                        className="popup-btn-action bg-blue-600 text-white hover:bg-blue-700 text-xs py-1 px-3 shadow-md"
+                    >
+                        <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z" /></svg>
+                        Compartilhar Local
+                    </button>
+                </div>
+            </Popup>
+        </Marker>
+    );
 };
 
 const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar }) => {
@@ -89,7 +115,7 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar }) => {
     };
     return (
         <CircleMarker center={[quadra.lat, quadra.lng]} pathOptions={{ color: isFeita ? '#166534' : '#b91c1c', fillColor: isFeita ? '#22c55e' : '#ef4444', fillOpacity: 1, weight: 2 }} radius={16} eventHandlers={{ click: alternarQuadra }}>
-            <Tooltip direction="center" permanent className="sem-fundo"><span className="font-bold text-white text-[20px]">{quadra.id}</span></Tooltip> 
+            <Tooltip direction="center" permanent className="sem-fundo"><span className="font-bold text-white text-[16px]">{quadra.id}</span></Tooltip>
         </CircleMarker>
     );
 };
@@ -97,7 +123,7 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar }) => {
 // --- TERRITÓRIO DETALHADO ---
 const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, listaUsuarios }) => {
     const [dadosBanco, setDadosBanco] = useState({ status: 'aberto', quadras_feitas: [], designadoPara: null, designadoNome: null, ultimaConclusao: null });
-    const [usuarioSelecionado, setUsuarioSelecionado] = useState(""); // Começa vazio (Livre/Devolver)
+    const [usuarioSelecionado, setUsuarioSelecionado] = useState("");
     const [msgPronta, setMsgPronta] = useState(null);
     const [posicaoClique, setPosicaoClique] = useState(null);
 
@@ -113,9 +139,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             if (docSnapshot.exists()) {
                 const data = docSnapshot.data();
                 setDadosBanco(data);
-                // IMPORTANTE: NÃO setamos o usuarioSelecionado aqui. 
-                // Deixamos vazio "" para que o dropdown sempre inicie na opção de "Devolver/Livre".
-                // O responsável atual será mostrado em um label separado.
                 setUsuarioSelecionado("");
             } else { setDoc(docSnapshot.ref, { status: 'aberto', nome: nome, quadras_feitas: [] }); }
         });
@@ -130,9 +153,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const feitas = dadosBanco.quadras_feitas?.length || 0;
     const total = listaQuadras.length;
     const porcentagem = total > 0 ? (feitas / total) * 100 : 0;
-    const deveMostrarQuadras = zoomLevel >= 16 && (isAdmin || isMeu); // numero maior mais perto, definir bolinhas
+    const deveMostrarQuadras = zoomLevel >= 16 && (isAdmin || isMeu);
 
-    // --- Lógica de Tempo e Cores (Heatmap 4 tons) ---
     let diasSemTrabalhar = 0;
     let textoTempo = "Nunca";
     if (dadosBanco.ultimaConclusao) {
@@ -154,19 +176,15 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     const gerarLinkMsg = (uNome, uWhats) => {
         const baseUrl = window.location.href.split('?')[0].split('#')[0] + '#/app';
-        const linkInterno = `${baseUrl}?lat=${centro.lat}&lng=${centro.lng}&z=18`;
-        const textoMsg = `Olá *${uNome}*! 🗺️\nO território *${nome}* foi designado para você.\n\n📍 *Acesse pelo App:* ${linkInterno}\n\nBom trabalho!`;
+        const linkInterno = `${baseUrl}?lat=${centro.lat}&lng=${centro.lng}&z=16`;
+        const textoMsg = `Olá *${uNome}*! \nO território *${nome}* foi designado para você.\n\n *Acesse pelo App:* ${linkInterno}\n\nBom trabalho!`;
         return { texto: textoMsg, whatsapp: uWhats, nome: uNome };
     };
 
     const salvarDesignacao = async () => {
         const idSeguro = `t_${idTerritorio}`;
-
-        // Se usuarioSelecionado é vazio, significa "Devolver"
         if (!usuarioSelecionado) {
-            // Se já estava livre, não faz nada
             if (!dadosBanco.designadoPara) return;
-
             if (!confirm("Confirmar devolução do território?")) return;
             const updateData = { designadoPara: null, designadoNome: null, dataDesignacao: null };
             if (isCompleto) { updateData.ultimaConclusao = new Date(); updateData.quadras_feitas = []; }
@@ -174,8 +192,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             setMsgPronta(null);
             return;
         }
-
-        // Se selecionou alguém
         const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
         const nomeUsuario = usuarioObj ? usuarioObj.nome : "Dirigente";
         await updateDoc(doc(db, "territorios", idSeguro), { designadoPara: usuarioSelecionado, designadoNome: nomeUsuario, dataDesignacao: new Date() });
@@ -183,10 +199,14 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         setMsgPronta(msg);
     };
 
-    const reenviarMsgAtual = () => {
+    // --- COMPARTILHAMENTO DIRETO ---
+    const compartilharDiretamente = () => {
         const usuarioObj = listaUsuarios.find(u => u.email === dadosBanco.designadoPara);
         const msg = gerarLinkMsg(dadosBanco.designadoNome, usuarioObj?.whatsapp);
-        setMsgPronta(msg);
+
+        const textoEncoded = encodeURIComponent(msg.texto);
+        const url = msg.whatsapp ? `https://wa.me/${msg.whatsapp.replace(/\D/g, '')}?text=${textoEncoded}` : `https://wa.me/?text=${textoEncoded}`;
+        window.open(url, '_blank');
     };
 
     const abrirWhatsapp = () => {
@@ -197,21 +217,18 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         setMsgPronta(null);
     };
 
+    // --- PONTO DE ENCONTRO ---
     const compartilharPontoEncontro = () => {
         const ponto = posicaoClique || centro;
-        const linkGoogle = `http://googleusercontent.com/maps.google.com/maps?q=${ponto.lat},${ponto.lng}`;
-        const texto = `📍 *Ponto de Encontro* para o território *${nome}*:\n\n${linkGoogle}`;
+        // CORREÇÃO: Link padrão universal do Google Maps
+        const linkGoogle = `https://www.google.com/maps?q=${ponto.lat},${ponto.lng}`;
+        const texto = `*Ponto de Encontro* para o território *${nome}*:\n\n${linkGoogle}`;
         const textoEncoded = encodeURIComponent(texto);
         window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
     };
 
-    // --- LÓGICA DO BOTÃO E ESTADO ---
-    const isCurrentlyAssigned = !!dadosBanco.designadoPara; // Tem dono atualmente?
-    const isSelectingToFree = !usuarioSelecionado; // Selecionou "Devolver"?
-
-    // Se tem dono e selecionei livre -> Ação de Devolver
-    // Se não tem dono e selecionei livre -> Inativo
-    // Se selecionei alguém -> Ação de Salvar
+    const isCurrentlyAssigned = !!dadosBanco.designadoPara;
+    const isSelectingToFree = !usuarioSelecionado;
 
     return (
         <>
@@ -244,8 +261,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                     </div>
                                 ) : (
                                     <div className="animate-fade-in">
-
-                                        {/* EXIBIÇÃO: RESPONSÁVEL ATUAL (SEPARADO DO INPUT) */}
                                         <div className="mb-2 p-2 bg-white rounded border border-slate-200 shadow-sm text-center">
                                             <span className="text-[10px] text-slate-400 font-bold uppercase block">Responsável Atual</span>
                                             {dadosBanco.designadoPara ? (
@@ -255,7 +270,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                             )}
                                         </div>
 
-                                        {/* AÇÃO: SELECT */}
                                         <label className="text-[10px] uppercase font-bold text-gray-400 mb-1 block">Ação / Alterar para:</label>
                                         <select
                                             className="w-full p-2 mb-2 text-sm bg-white border border-gray-300 rounded focus:border-blue-500 outline-none"
@@ -270,13 +284,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                             ))}
                                         </select>
 
-                                        {/* BOTÃO INTELIGENTE */}
                                         <button
                                             onClick={salvarDesignacao}
-                                            disabled={!isCurrentlyAssigned && isSelectingToFree} // Desabilita se já for livre e estiver selecionado "Livre"
+                                            disabled={!isCurrentlyAssigned && isSelectingToFree}
                                             className={`popup-btn-action text-white mb-2 ${!isCurrentlyAssigned && isSelectingToFree ? 'bg-gray-300 cursor-not-allowed text-gray-500' :
-                                                    isSelectingToFree ? 'bg-red-500 hover:bg-red-600' : // É Devolução
-                                                        'bg-blue-600 hover:bg-blue-700' // É Designação
+                                                isSelectingToFree ? 'bg-red-500 hover:bg-red-600' :
+                                                    'bg-blue-600 hover:bg-blue-700'
                                                 }`}
                                         >
                                             {!isCurrentlyAssigned && isSelectingToFree ? "Já está Disponível" :
@@ -284,19 +297,18 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                                     "Salvar Designação"}
                                         </button>
 
-                                        {/* AÇÕES ADICIONAIS (Se tiver dono) */}
                                         {donoDoTerritorio && (
-                                            <button onClick={reenviarMsgAtual} className="popup-btn-action bg-white border border-green-600 text-green-700 hover:bg-green-50 text-xs py-1">
+                                            <button onClick={compartilharDiretamente} className="popup-btn-action bg-white border border-green-600 text-green-700 hover:bg-green-50 text-xs py-1">
                                                 Compartilhar Novamente
                                             </button>
                                         )}
 
-                                        {/* PONTO DE ENCONTRO (Se for Admin e dono) */}
                                         {isMeu && (
                                             <div className="pt-2 mt-2 border-t border-gray-200">
                                                 <button onClick={compartilharPontoEncontro} className="popup-btn-action bg-green-600 text-white hover:bg-green-700 shadow-md w-full">
                                                     Compartilhar este ponto de encontro
                                                 </button>
+                                                <p className="text-[9px] text-gray-400 text-center mt-1">O link será do local exato onde você clicou.</p>
                                             </div>
                                         )}
                                     </div>

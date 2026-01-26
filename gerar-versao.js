@@ -25,14 +25,23 @@ fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
 const date = new Date();
 const buildDate = `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')} às ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
 
-// 5. Cria o arquivo para o React ler
+// 5. Cria o objeto com as informações
 const versionInfo = {
     version: novaVersao,
     buildDate: buildDate
 };
 
-// Salva o arquivo dentro da pasta src
+// --- AQUI ESTÁ A ATUALIZAÇÃO ---
+
+// Salva na pasta SRC (Para o React usar internamente no Menu/Rodapé)
 fs.writeFileSync('./src/version.json', JSON.stringify(versionInfo, null, 2));
+
+// Salva na pasta PUBLIC (Para o AutoUpdate conseguir baixar e checar se mudou)
+if (!fs.existsSync('./public')) {
+    fs.mkdirSync('./public');
+}
+fs.writeFileSync('./public/version.json', JSON.stringify(versionInfo, null, 2));
 
 console.log(`🚀 Versão atualizada: ${versaoAtual} -> ${novaVersao}`);
 console.log(`📅 Build: ${buildDate}`);
+console.log(`📂 Arquivos de versão gerados em /src e /public`);
