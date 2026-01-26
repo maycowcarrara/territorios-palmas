@@ -1,12 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const Relatorios = () => {
     const [territorios, setTerritorios] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [filtro, setFiltro] = useState('todos'); // 'todos', 'livres', 'atrasados'
+
+    // --- ESTADOS DE FILTRO E ORDENAÇÃO ---
+    const [busca, setBusca] = useState('');
+    const [statusFiltro, setStatusFiltro] = useState('todos');
+    const [tempoFiltro, setTempoFiltro] = useState('todos');
+    const [sortConfig, setSortConfig] = useState({ key: 'diasParado', direction: 'desc' });
 
     useEffect(() => {
         const carregarDados = async () => {
@@ -14,31 +21,45 @@ const Relatorios = () => {
             const lista = querySnapshot.docs.map(doc => {
                 const data = doc.data();
 
-                // Cálculo de dias parado
+                // --- CÁLCULOS DE DATAS ---
                 let diasParado = 0;
+                let dataUltimaStr = '-';
+                let dataUltimaObj = null;
+
                 if (data.ultimaConclusao) {
-                    const dataUltima = data.ultimaConclusao.toDate ? data.ultimaConclusao.toDate() : new Date(data.ultimaConclusao);
-                    diasParado = Math.ceil(Math.abs(new Date() - dataUltima) / (1000 * 60 * 60 * 24));
+                    dataUltimaObj = data.ultimaConclusao.toDate ? data.ultimaConclusao.toDate() : new Date(data.ultimaConclusao);
+                    diasParado = Math.ceil(Math.abs(new Date() - dataUltimaObj) / (1000 * 60 * 60 * 24));
+                    dataUltimaStr = dataUltimaObj.toLocaleDateString('pt-BR');
                 }
 
-                // Cálculo de dias com o dirigente (se ocupado)
                 let diasComDirigente = 0;
+                let dataDesigStr = '-';
+                let dataDesigObj = null;
+
                 if (data.designadoPara && data.dataDesignacao) {
-                    const dataDesig = data.dataDesignacao.toDate ? data.dataDesignacao.toDate() : new Date(data.dataDesignacao);
-                    diasComDirigente = Math.ceil(Math.abs(new Date() - dataDesig) / (1000 * 60 * 60 * 24));
+                    dataDesigObj = data.dataDesignacao.toDate ? data.dataDesignacao.toDate() : new Date(data.dataDesignacao);
+                    diasComDirigente = Math.ceil(Math.abs(new Date() - dataDesigObj) / (1000 * 60 * 60 * 24));
+                    dataDesigStr = dataDesigObj.toLocaleDateString('pt-BR');
                 }
+
+                const nomeSeguro = data.nome || `Território ${doc.id}`;
+                const numeroId = parseInt(doc.id.replace('t_', '')) || 0;
 
                 return {
                     id: doc.id,
+                    numeroId,
                     ...data,
+                    nome: nomeSeguro,
                     diasParado,
                     diasComDirigente,
+                    dataUltimaStr,
+                    dataUltimaObj,
+                    dataDesigStr,
+                    dataDesigObj,
                     status: data.designadoPara ? 'ocupado' : 'livre'
                 };
             });
 
-            // Ordenar: Primeiro os atrasados (mais dias parados), depois por nome
-            lista.sort((a, b) => b.diasParado - a.diasParado);
             setTerritorios(lista);
             setLoading(false);
         };
@@ -46,127 +67,305 @@ const Relatorios = () => {
         carregarDados();
     }, []);
 
-    // Estatísticas Gerais
+    // --- AÇÕES DOS FILTROS ---
+    const limparFiltros = () => {
+        setBusca('');
+        setStatusFiltro('todos');
+        setTempoFiltro('todos');
+        setSortConfig({ key: 'diasParado', direction: 'desc' });
+    };
+
+    // Ação ao clicar nos cards de resumo
+    const aplicarFiltroRapido = (tipo) => {
+        limparFiltros(); // Reseta primeiro
+        if (tipo === 'livre') setStatusFiltro('livre');
+        if (tipo === 'ocupado') setStatusFiltro('ocupado');
+        if (tipo === 'criticos') setTempoFiltro('criticos');
+        // Se for 'total', o limparFiltros já resolveu
+    };
+
+    // --- LÓGICA DE FILTRAGEM (USEMEMO) ---
+    const dadosProcessados = useMemo(() => {
+        let dados = [...territorios];
+
+        // 1. Filtrar
+        if (statusFiltro !== 'todos') {
+            dados = dados.filter(t => t.status === statusFiltro);
+        }
+        if (tempoFiltro === 'criticos') {
+            dados = dados.filter(t => t.diasParado > 120);
+        }
+
+        if (busca) {
+            const termo = busca.toLowerCase();
+            dados = dados.filter(t => {
+                const nomeLower = t.nome ? t.nome.toLowerCase() : '';
+                const idString = t.numeroId ? t.numeroId.toString() : '';
+                const responsavelLower = t.designadoNome ? t.designadoNome.toLowerCase() : '';
+
+                return nomeLower.includes(termo) ||
+                    idString.includes(termo) ||
+                    responsavelLower.includes(termo);
+            });
+        }
+
+        // 2. Ordenar
+        if (sortConfig.key) {
+            dados.sort((a, b) => {
+                let aValue = a[sortConfig.key];
+                let bValue = b[sortConfig.key];
+
+                if (aValue === null || aValue === undefined || aValue === '-') return 1;
+                if (bValue === null || bValue === undefined || bValue === '-') return -1;
+
+                if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        return dados;
+    }, [territorios, busca, statusFiltro, tempoFiltro, sortConfig]);
+
+    const handleSort = (key) => {
+        let direction = 'asc';
+        if (sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const getSortIcon = (key) => {
+        if (sortConfig.key !== key) return <span className="text-gray-300 ml-1 text-[10px]">↕</span>;
+        return sortConfig.direction === 'asc' ? <span className="text-blue-600 ml-1 text-[10px]">▲</span> : <span className="text-blue-600 ml-1 text-[10px]">▼</span>;
+    };
+
+    // Estatísticas Gerais (Sempre calculadas sobre o total)
     const total = territorios.length;
     const ocupados = territorios.filter(t => t.status === 'ocupado').length;
     const livres = total - ocupados;
-    // Consideramos "Crítico" se não trabalhado há mais de 4 meses (120 dias)
     const criticos = territorios.filter(t => t.diasParado > 120).length;
 
-    // Filtragem da Tabela
-    const dadosFiltrados = territorios.filter(t => {
-        if (filtro === 'livres') return t.status === 'livre';
-        if (filtro === 'atrasados') return t.diasParado > 120;
-        return true;
-    });
-
-    // Função de cor baseada no tempo parado (Igual ao Mapa)
     const getCorTempo = (dias) => {
-        if (dias > 180) return 'bg-orange-600 text-white'; // > 6 meses
-        if (dias > 120) return 'bg-orange-500 text-white'; // 4-6 meses
-        if (dias > 60) return 'bg-orange-300 text-orange-900';  // 2-4 meses
-        if (dias > 0) return 'bg-orange-100 text-orange-800';   // Recente
-        return 'bg-slate-100 text-slate-500'; // Nunca feito ou muito recente
+        if (dias > 180) return 'bg-orange-600 text-white';
+        if (dias > 120) return 'bg-orange-500 text-white';
+        if (dias > 60) return 'bg-orange-300 text-orange-900';
+        if (dias > 0) return 'bg-orange-100 text-orange-800';
+        return 'bg-slate-100 text-slate-500';
+    };
+
+    const exportarPDF = () => {
+        const doc = new jsPDF();
+        doc.setFontSize(18);
+        doc.text("Relatório de Territórios", 14, 20);
+        doc.setFontSize(10);
+        doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 26);
+
+        doc.setFontSize(8);
+        doc.setTextColor(100);
+        const textoFiltro = busca ? `Busca: "${busca}"` : "Sem busca";
+        doc.text(`Filtros: Status (${statusFiltro}) | Tempo (${tempoFiltro}) | ${textoFiltro}`, 14, 31);
+
+        const tableColumn = ["Cód.", "Nome", "Status", "Responsável", "Designado em", "Concluído em", "Dias Parado"];
+        const tableRows = [];
+
+        dadosProcessados.forEach(t => {
+            const dadosLinha = [
+                t.numeroId,
+                t.nome,
+                t.status === 'ocupado' ? 'Ocupado' : 'Livre',
+                t.designadoNome || '-',
+                t.dataDesigStr,
+                t.dataUltimaStr,
+                t.diasParado > 0 ? `${t.diasParado} dias` : 'Nunca'
+            ];
+            tableRows.push(dadosLinha);
+        });
+
+        autoTable(doc, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 35,
+            theme: 'grid',
+            styles: { fontSize: 8, cellPadding: 2 },
+            headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255] }
+        });
+
+        doc.save(`Relatorio_Territorios.pdf`);
     };
 
     if (loading) return <div className="flex h-screen items-center justify-center text-blue-600 font-bold">Carregando dados...</div>;
 
     return (
         <div className="min-h-screen bg-slate-50 p-4 font-sans">
-            <div className="max-w-6xl mx-auto">
+            <div className="max-w-7xl mx-auto">
 
-                {/* HEADER */}
-                <header className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-8">
-                    <div>
+                {/* HEADER RESPONSIVO */}
+                <header className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
+                    <div className="text-center md:text-left">
                         <h1 className="text-2xl font-extrabold text-slate-800">Relatório de Territórios</h1>
                         <p className="text-slate-500 text-sm">Visão geral do progresso e designações.</p>
                     </div>
-                    <Link to="/app" className="px-4 py-2 bg-white text-slate-700 font-medium rounded-lg border border-slate-200 shadow-sm hover:bg-slate-50 text-sm">
-                        ← Voltar ao Mapa
-                    </Link>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                        <button onClick={exportarPDF} className="justify-center px-4 py-2 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 text-sm flex items-center gap-2 transition-colors">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                            Baixar PDF
+                        </button>
+                        <Link to="/app" className="justify-center px-4 py-2 bg-white text-slate-700 font-medium rounded-lg border border-slate-200 shadow-sm hover:bg-slate-50 text-sm transition-colors text-center">
+                            ← Mapa
+                        </Link>
+                    </div>
                 </header>
 
-                {/* CARDS DE RESUMO */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                {/* CARDS DE RESUMO INTERATIVOS (CLICÁVEIS) */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div
+                        onClick={() => aplicarFiltroRapido('total')}
+                        className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer transition-all hover:border-slate-300"
+                    >
                         <p className="text-xs font-bold text-slate-400 uppercase">Total</p>
                         <p className="text-3xl font-black text-slate-700">{total}</p>
+                        <p className="text-[10px] text-slate-400 mt-1">Clique para ver todos</p>
                     </div>
-                    <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm">
+
+                    <div
+                        onClick={() => aplicarFiltroRapido('ocupado')}
+                        className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-blue-100"
+                    >
                         <p className="text-xs font-bold text-blue-400 uppercase">Designados</p>
                         <p className="text-3xl font-black text-blue-700">{ocupados}</p>
+                        <p className="text-[10px] text-blue-400 mt-1">Clique para filtrar</p>
                     </div>
-                    <div className="bg-green-50 p-4 rounded-xl border border-green-100 shadow-sm">
+
+                    <div
+                        onClick={() => aplicarFiltroRapido('livre')}
+                        className="bg-green-50 p-4 rounded-xl border border-green-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-green-100"
+                    >
                         <p className="text-xs font-bold text-green-500 uppercase">Disponíveis</p>
                         <p className="text-3xl font-black text-green-700">{livres}</p>
+                        <p className="text-[10px] text-green-500 mt-1">Clique para filtrar</p>
                     </div>
-                    <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 shadow-sm">
+
+                    <div
+                        onClick={() => aplicarFiltroRapido('criticos')}
+                        className="bg-orange-50 p-4 rounded-xl border border-orange-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-orange-100"
+                    >
                         <p className="text-xs font-bold text-orange-500 uppercase">Atrasados (+4 meses)</p>
                         <p className="text-3xl font-black text-orange-700">{criticos}</p>
+                        <p className="text-[10px] text-orange-500 mt-1">Clique para ver lista</p>
                     </div>
                 </div>
 
-                {/* FILTROS E TABELA */}
-                <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 flex gap-2 overflow-x-auto">
-                        <button
-                            onClick={() => setFiltro('todos')}
-                            className={`px-3 py-1 text-xs font-bold rounded-full transition-colors ${filtro === 'todos' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                        >
-                            Todos
-                        </button>
-                        <button
-                            onClick={() => setFiltro('livres')}
-                            className={`px-3 py-1 text-xs font-bold rounded-full transition-colors ${filtro === 'livres' ? 'bg-green-600 text-white' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}
-                        >
-                            Apenas Livres
-                        </button>
-                        <button
-                            onClick={() => setFiltro('atrasados')}
-                            className={`px-3 py-1 text-xs font-bold rounded-full transition-colors ${filtro === 'atrasados' ? 'bg-orange-600 text-white' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'}`}
-                        >
-                            Prioridade (+ Antigos)
-                        </button>
-                    </div>
+                {/* BARRA DE FILTROS */}
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
+                    <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center">
+                        <div className="relative w-full lg:w-1/3">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            </span>
+                            <input
+                                type="text"
+                                placeholder="Buscar nome, código ou dirigente..."
+                                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                                value={busca}
+                                onChange={(e) => setBusca(e.target.value)}
+                            />
+                        </div>
 
+                        <div className="flex flex-col sm:flex-row w-full lg:w-auto gap-2 flex-1">
+                            <select
+                                value={statusFiltro}
+                                onChange={(e) => setStatusFiltro(e.target.value)}
+                                className="w-full sm:w-auto px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 cursor-pointer"
+                            >
+                                <option value="todos">Status: Todos</option>
+                                <option value="livre">Apenas Livres</option>
+                                <option value="ocupado">Apenas Ocupados</option>
+                            </select>
+
+                            <select
+                                value={tempoFiltro}
+                                onChange={(e) => setTempoFiltro(e.target.value)}
+                                className="w-full sm:w-auto px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 cursor-pointer"
+                            >
+                                <option value="todos">Tempo: Todos</option>
+                                <option value="criticos">⚠️ Críticos (+4 meses)</option>
+                            </select>
+
+                            {(busca || statusFiltro !== 'todos' || tempoFiltro !== 'todos') && (
+                                <button
+                                    onClick={limparFiltros}
+                                    className="w-full sm:w-auto px-3 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 font-semibold"
+                                >
+                                    ✕ Limpar
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* TABELA DE DADOS */}
+                <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm whitespace-nowrap">
                             <thead className="bg-slate-50 text-slate-500 font-semibold uppercase text-xs">
                                 <tr>
-                                    <th className="px-4 py-3">Território</th>
-                                    <th className="px-4 py-3">Status</th>
-                                    <th className="px-4 py-3">Responsável</th>
-                                    <th className="px-4 py-3 text-center">Tempo com Dirigente</th>
-                                    <th className="px-4 py-3 text-right">Última Conclusão</th>
+                                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('numeroId')}>
+                                        Cód. {getSortIcon('numeroId')}
+                                    </th>
+                                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('nome')}>
+                                        Nome {getSortIcon('nome')}
+                                    </th>
+                                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('status')}>
+                                        Status {getSortIcon('status')}
+                                    </th>
+                                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('designadoNome')}>
+                                        Responsável {getSortIcon('designadoNome')}
+                                    </th>
+                                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none hidden sm:table-cell" onClick={() => handleSort('dataDesigObj')}>
+                                        Designado em {getSortIcon('dataDesigObj')}
+                                    </th>
+                                    <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 select-none hidden sm:table-cell" onClick={() => handleSort('dataUltimaObj')}>
+                                        Conclusão {getSortIcon('dataUltimaObj')}
+                                    </th>
+                                    <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('diasParado')}>
+                                        Tempo Parado {getSortIcon('diasParado')}
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {dadosFiltrados.map((t) => (
+                                {dadosProcessados.map((t) => (
                                     <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-4 py-3 text-xs font-mono text-slate-400 font-bold">
+                                            {t.numeroId}
+                                        </td>
                                         <td className="px-4 py-3 font-bold text-slate-700">
                                             {t.nome}
                                         </td>
                                         <td className="px-4 py-3">
                                             {t.status === 'ocupado' ?
-                                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-700">● Ocupado</span> :
-                                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">● Livre</span>
+                                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 uppercase">Ocupado</span> :
+                                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 uppercase">Livre</span>
                                             }
                                         </td>
                                         <td className="px-4 py-3 text-slate-600">
                                             {t.designadoNome || '-'}
                                         </td>
-                                        <td className="px-4 py-3 text-center text-slate-500">
-                                            {t.status === 'ocupado' ? `${t.diasComDirigente} dias` : '-'}
+                                        <td className="px-4 py-3 text-slate-500 text-xs hidden sm:table-cell">
+                                            {t.dataDesigStr}
+                                        </td>
+                                        <td className="px-4 py-3 text-right text-slate-500 text-xs hidden sm:table-cell">
+                                            {t.dataUltimaStr}
                                         </td>
                                         <td className="px-4 py-3 text-right">
                                             <span className={`px-2 py-1 rounded text-xs font-bold ${getCorTempo(t.diasParado)}`}>
-                                                {t.diasParado === 0 ? 'Nunca' : `${t.diasParado} dias atrás`}
+                                                {t.diasParado === 0 ? 'Nunca' : `${t.diasParado} dias`}
                                             </span>
                                         </td>
                                     </tr>
                                 ))}
-                                {dadosFiltrados.length === 0 && (
-                                    <tr><td colSpan="5" className="p-8 text-center text-slate-400">Nenhum território encontrado neste filtro.</td></tr>
+                                {dadosProcessados.length === 0 && (
+                                    <tr><td colSpan="7" className="p-8 text-center text-slate-400">Nenhum território encontrado com os filtros atuais.</td></tr>
                                 )}
                             </tbody>
                         </table>
