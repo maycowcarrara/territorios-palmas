@@ -5,34 +5,50 @@ import { auth, googleProvider } from './firebase';
 import Mapa from './Mapa';
 import { useUsuario } from './useUsuario';
 import AdminPanel from './AdminPanel';
+import Relatorios from './Relatorios'; 
+import appInfo from './version.json';
 
-// --- TELA DE LOGIN (MANTIDA IGUAL) ---
+// --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
+// Isso garante que pegamos o evento mesmo antes do React renderizar qualquer coisa
+let deferredPromptGlobal = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  // Previne que o Chrome mostre a barra mini automaticamente
+  e.preventDefault();
+  // Salva o evento na variável global para usarmos depois
+  deferredPromptGlobal = e;
+});
+
+// --- TELA DE LOGIN ---
 function Login() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState('');
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) navigate('/app');
+    });
+    return () => unsubscribe();
+  }, [navigate]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
     setErro('');
     try {
       await signInWithPopup(auth, googleProvider);
-      navigate('/app');
     } catch (error) {
       console.error(error);
       setErro("Erro ao conectar com Google. Tente novamente.");
-    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center h-screen bg-gray-100">
-      <div className="w-96 bg-white shadow-xl rounded-xl overflow-hidden border border-gray-200">
+    <div className="flex items-center justify-center h-[100dvh] bg-gray-100">
+      <div className="w-96 bg-white shadow-xl rounded-xl overflow-hidden border border-gray-200 m-4">
         <div className="p-8 text-center">
-          <h2 className="text-3xl font-bold text-blue-600 mb-2">
-            Territórios
-          </h2>
+          <h2 className="text-3xl font-bold text-blue-600 mb-2">Territórios</h2>
           <p className="text-gray-500 mb-8">Palmas - PR</p>
 
           <div className="flex flex-col gap-4">
@@ -109,7 +125,7 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
             <span className="w-8 h-8 rounded bg-gray-500 border border-gray-700 opacity-30 flex-shrink-0"></span>
             <div>
               <p className="text-gray-800 font-bold text-sm">Ocupado</p>
-              <p className="text-gray-500 text-xs">Outro publicador cuidando</p>
+              <p className="text-gray-500 text-xs">Outro dirigente cuidando</p>
             </div>
           </div>
         </div>
@@ -122,11 +138,49 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
   );
 };
 
-// --- MENU LATERAL (AGORA NA DIREITA) ---
+// --- MENU LATERAL ---
 const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout }) => {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+
+  useEffect(() => {
+    // 1. Tenta pegar da variável global (capturada no início do script)
+    if (deferredPromptGlobal) {
+      setDeferredPrompt(deferredPromptGlobal);
+    }
+
+    // 2. Define um listener local como fallback (caso o evento dispare tarde)
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      deferredPromptGlobal = e; // Atualiza global também
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const instalarApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+        deferredPromptGlobal = null;
+      }
+    } else {
+      // Fallback visual se não conseguirmos disparar o prompt nativo
+      alert('Para instalar: Abra o menu do navegador (três pontinhos) e procure "Adicionar à Tela Inicial" ou "Instalar Aplicativo".');
+    }
+  };
+
+  // Verifica se já está rodando como App instalado
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+
   return (
     <>
-      {/* Fundo Escuro */}
       {isOpen && (
         <div
           className="fixed inset-0 z-[50] bg-black/50 transition-opacity"
@@ -134,10 +188,8 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout })
         ></div>
       )}
 
-      {/* Menu deslizando da DIREITA (right-0) */}
       <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[51] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
 
-        {/* Cabeçalho do Menu */}
         <div className="bg-blue-600 p-6 text-white">
           <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -155,14 +207,13 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout })
             </div>
           </div>
           <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-800/50 border border-blue-400/30 text-blue-100">
-            {isAdmin ? 'Administrador' : 'Publicador'}
+            {isAdmin ? 'Administrador' : 'Dirigente'}
           </span>
         </div>
 
-        {/* Links do Menu */}
-        <div className="p-4 flex flex-col gap-2">
+        <div className="p-4 flex flex-col gap-2 flex-1">
 
-          <button onClick={onClose} className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 text-blue-700 font-medium">
+          <button onClick={() => { navigate('/app'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 text-blue-700 font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
             </svg>
@@ -170,27 +221,43 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout })
           </button>
 
           {isAdmin && (
-            <button
-              onClick={() => { navigate('/admin'); onClose(); }}
-              className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-              </svg>
-              Gerenciar Usuários
-            </button>
+            <>
+              <button
+                onClick={() => { navigate('/admin'); onClose(); }}
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                </svg>
+                Gerenciar Usuários
+              </button>
+
+              {/* NOVA OPÇÃO: RELATÓRIOS */}
+              <button
+                onClick={() => { navigate('/relatorios'); onClose(); }}
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+                  <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+                </svg>
+                Relatórios
+              </button>
+            </>
           )}
 
-          <button
-            disabled
-            className="flex items-center gap-3 p-3 rounded-lg text-gray-400 cursor-not-allowed"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
-              <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
-            </svg>
-            Relatórios (Em breve)
-          </button>
+          {/* Só mostra o botão se NÃO estiver rodando como App instalado */}
+          {!isStandalone && (
+            <button
+              onClick={instalarApp}
+              className="flex items-center gap-3 p-3 rounded-lg hover:bg-green-50 text-green-700 transition-colors font-medium border border-dashed border-green-200 mt-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+              Instalar Aplicativo
+            </button>
+          )}
 
           <div className="h-px bg-gray-100 my-2"></div>
 
@@ -205,26 +272,34 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout })
           </button>
 
         </div>
+
+        {/* RODAPÉ COM VERSÃO AUTOMÁTICA */}
+        <div className="p-4 text-center text-[10px] text-gray-300 bg-gray-50 border-t border-gray-100">
+          <p>Territórios Digitais v{appInfo.version}</p>
+          <p className="opacity-70">Atualizado em: {appInfo.buildDate}</p>
+          <p className="mt-1">Desenvolvido com carinho ❤️</p>
+        </div>
+
       </div>
     </>
   );
 };
-
 
 // --- DASHBOARD (Tela Principal) ---
 function Dashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [verificandoLogin, setVerificandoLogin] = useState(true);
-
-  // Estados dos Menus
   const [menuAberto, setMenuAberto] = useState(false);
   const [legendaAberta, setLegendaAberta] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!currentUser) navigate('/');
-      else setUser(currentUser);
+      if (!currentUser) {
+        navigate('/');
+      } else {
+        setUser(currentUser);
+      }
       setVerificandoLogin(false);
     });
     return () => unsubscribe();
@@ -239,10 +314,10 @@ function Dashboard() {
 
   if (verificandoLogin || (user && verificandoBanco)) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-100">
+      <div className="h-[100dvh] flex items-center justify-center bg-gray-100">
         <div className="flex flex-col items-center gap-2">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <span className="text-blue-600 font-semibold text-sm">Carregando permissões...</span>
+          <span className="text-blue-600 font-semibold text-sm">Carregando sistema...</span>
         </div>
       </div>
     );
@@ -252,7 +327,7 @@ function Dashboard() {
 
   if (!autorizado) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-100 p-4">
+      <div className="h-[100dvh] flex items-center justify-center bg-gray-100 p-4">
         <div className="w-96 bg-white shadow-xl rounded-xl p-6 text-center border border-red-100">
           <h2 className="text-2xl font-bold text-red-600 mb-2">Acesso Restrito</h2>
           <p className="mb-6 text-gray-600">O e-mail <strong>{user.email}</strong> não está cadastrado.</p>
@@ -262,10 +337,8 @@ function Dashboard() {
     );
   }
 
-  // --- TELA DO SISTEMA ---
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
-
+    <div className="h-[100dvh] flex flex-col overflow-hidden relative">
       <MenuLateral
         isOpen={menuAberto}
         onClose={() => setMenuAberto(false)}
@@ -281,21 +354,16 @@ function Dashboard() {
         isAdmin={isAdmin}
       />
 
-      {/* BARRA DE NAVEGAÇÃO SUPERIOR */}
-      <div className="h-16 bg-blue-600 text-white shadow-md z-20 px-4 flex items-center justify-between">
-
-        {/* Título (Esquerda) */}
+      {/* BARRA SUPERIOR */}
+      <div className="h-16 bg-blue-600 text-white shadow-md z-20 px-4 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
           <span className="text-xl font-bold tracking-wide">Territórios</span>
         </div>
 
-        {/* Ações (Direita) */}
         <div className="flex items-center gap-4">
-
-          {/* Botão de Info (DESTACADO: Fundo branco, ícone azul) */}
           <button
             onClick={() => setLegendaAberta(true)}
-            className="w-9 h-9 bg-white text-blue-600 rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform"
+            className="w-9 h-9 bg-white text-blue-600 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-transform"
             title="Legenda de Cores"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -303,7 +371,6 @@ function Dashboard() {
             </svg>
           </button>
 
-          {/* Menu Sanduíche */}
           <button
             onClick={() => setMenuAberto(true)}
             className="p-1 hover:bg-blue-700 rounded transition-colors"
@@ -312,10 +379,10 @@ function Dashboard() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-
         </div>
       </div>
 
+      {/* ÁREA DO MAPA (Preenche o resto) */}
       <div className="flex-1 bg-gray-100 relative z-0">
         <Mapa user={user} isAdmin={isAdmin} />
       </div>
@@ -323,7 +390,6 @@ function Dashboard() {
   );
 }
 
-// --- ROTEAMENTO ---
 function App() {
   return (
     <HashRouter>
@@ -331,6 +397,8 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/app" element={<Dashboard />} />
         <Route path="/admin" element={<AdminPanel />} />
+        {/* NOVA ROTA DE RELATÓRIOS */}
+        <Route path="/relatorios" element={<Relatorios />} />
       </Routes>
     </HashRouter>
   );

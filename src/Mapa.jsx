@@ -1,111 +1,84 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker, ZoomControl } from 'react-leaflet';
+import { useLocation } from 'react-router-dom';
+import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker } from 'react-leaflet';
 import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
 import L from 'leaflet';
 
-// --- CSS EXTRA (Para o Tooltip transparente do Admin) ---
-// Adicione isso no seu index.css global se quiser, ou deixe o padrão branco mesmo.
-// A classe .leaflet-tooltip-transparent remove o fundo branco padrão do leaflet
+// --- CSS ---
 const cssTooltip = `
-  .label-prioridade {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    font-weight: 800;
-    color: #4a044e; /* Roxo escuro para contraste no laranja */
-    text-shadow: 1px 1px 0px rgba(255,255,255,0.8);
-    font-size: 10px;
-    text-transform: uppercase;
-    text-align: center;
-  }
+  .label-territorio { background: transparent; border: none; box-shadow: none; font-family: 'Bahnschrift', sans-serif-condensed, sans-serif; text-align: center; line-height: 1.1; pointer-events: none; }
+  .label-nome { font-weight: 700; font-size: 14px; color: #1e3a8a; text-shadow: 2px 0 #fff, -2px 0 #fff, 0 2px #fff, 0 -2px #fff, 1px 1px #fff, -1px -1px #fff; display: block; font-stretch: condensed; letter-spacing: -0.5px; margin-bottom: 2px; }
+  .label-status { font-size: 11px; font-weight: 700; color: #444; text-shadow: 1px 1px 0px rgba(255,255,255,0.9); background-color: rgba(255,255,255,0.7); padding: 1px 6px; border-radius: 8px; display: inline-block; }
+  .label-tempo { display: block; font-size: 10px; font-weight: 800; color: #7f1d1d; margin-top: 2px; text-shadow: 1px 1px 0px rgba(255,255,255,0.8); text-transform: uppercase; }
+  .sem-fundo { background: transparent; border: none; box-shadow: none; }
+  .map-layer-btn { width: 48px; height: 48px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s, border-color 0.2s; overflow: hidden; position: relative; background-size: cover; }
+  .map-layer-btn:active { transform: scale(0.95); }
+  .map-layer-btn.active { border-color: #2563eb; transform: scale(1.05); z-index: 10; }
+  .thumb-rua { background: #e5e7eb; } .thumb-rua::after { content: '🗺️'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; }
+  .thumb-satelite { background: #1a2e05; } .thumb-satelite::after { content: '🛰️'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; }
+  .popup-btn-action { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px; border-radius: 6px; font-weight: bold; font-size: 12px; transition: background-color 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1); cursor: pointer; }
 `;
 
-// --- 1. COMPONENTE DE CONTROLES ---
+// Função Centroide
+const calcularCentroide = (coords) => {
+    let lat = 0, lng = 0, n = coords.length;
+    coords.forEach(p => { lat += p[1]; lng += p[0]; });
+    return { lat: lat / n, lng: lng / n };
+};
+
+// --- DEEP LINK HANDLER ---
+const DeepLinkHandler = () => {
+    const map = useMap();
+    const location = useLocation();
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const lat = params.get('lat'); const lng = params.get('lng'); const z = params.get('z');
+        if (lat && lng) {
+            setTimeout(() => { map.flyTo([parseFloat(lat), parseFloat(lng)], parseFloat(z) || 18, { animate: true, duration: 1.5 }); }, 500);
+        }
+    }, [location, map]);
+    return null;
+};
+
+// --- COMPONENTES DE UI ---
+const SeletorCamadas = ({ tipoMapa, setTipoMapa }) => {
+    return (
+        <div className="absolute bottom-6 left-4 z-[400] flex flex-col gap-3">
+            <button onClick={() => setTipoMapa('padrao')} className={`map-layer-btn thumb-rua ${tipoMapa === 'padrao' ? 'active' : ''}`} title="Mapa de Ruas" />
+            <button onClick={() => setTipoMapa('satelite')} className={`map-layer-btn thumb-satelite ${tipoMapa === 'satelite' ? 'active' : ''}`} title="Satélite" />
+        </div>
+    );
+};
+
 const ControlesNavegacao = ({ setPosicaoUsuario }) => {
     const map = useMap();
     const [buscando, setBuscando] = useState(false);
-
     const encontrarUsuario = () => {
         setBuscando(true);
         map.locate().on("locationfound", function (e) {
-            setPosicaoUsuario(e.latlng);
-            map.flyTo(e.latlng, 17);
-            setBuscando(false);
-        }).on("locationerror", function (e) {
-            alert("Ative o GPS para ver sua localização.");
-            setBuscando(false);
-        });
+            setPosicaoUsuario(e.latlng); map.flyTo(e.latlng, 17); setBuscando(false);
+        }).on("locationerror", function (e) { alert("Ative o GPS."); setBuscando(false); });
     };
-
-    const btnClass = "bg-white w-12 h-12 flex items-center justify-center shadow-xl border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all duration-200";
-
     return (
-        <div className="absolute bottom-8 right-4 z-[400] flex flex-col gap-3">
-            <button
-                onClick={encontrarUsuario}
-                className={`${btnClass} rounded-full mb-2 text-blue-600 hover:text-blue-700 hover:border-blue-200`}
-                title="Onde estou?"
-            >
-                {buscando ? (
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-slate-300 border-t-blue-600"></div>
-                ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" y1="2" x2="12" y2="6" />
-                        <line x1="12" y1="18" x2="12" y2="22" />
-                        <line x1="6" y1="12" x2="2" y2="12" />
-                        <line x1="22" y1="12" x2="18" y2="12" />
-                        <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
-                    </svg>
-                )}
+        <div className="absolute bottom-6 right-4 z-[400] flex flex-col gap-3">
+            <button onClick={encontrarUsuario} className="bg-white w-12 h-12 flex items-center justify-center shadow-xl border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all duration-200 rounded-full mb-2 text-blue-600">
+                {buscando ? <div className="animate-spin rounded-full h-5 w-5 border-2 border-slate-300 border-t-blue-600"></div> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" /></svg>}
             </button>
-
-            {/* Como já temos o ZoomControl nativo no bottomright, removi o customizado aqui para não duplicar, 
-          ou mantemos o customizado e removemos o nativo no componente Mapa. 
-          Vou manter o seu customizado bonito e remover o nativo no Mapa. */}
-            <div className="flex flex-col shadow-xl rounded-xl overflow-hidden border border-slate-200">
-                <button
-                    onClick={() => map.zoomIn()}
-                    className={`${btnClass} text-slate-600 hover:text-blue-600 border-b border-slate-100 rounded-none shadow-none border-0`}
-                    title="Mais Zoom"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                </button>
-                <button
-                    onClick={() => map.zoomOut()}
-                    className={`${btnClass} text-slate-600 hover:text-blue-600 rounded-none shadow-none border-0`}
-                    title="Menos Zoom"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12h-15" />
-                    </svg>
-                </button>
+            <div className="flex flex-col shadow-xl rounded-xl overflow-hidden border border-slate-200 bg-white">
+                <button onClick={() => map.zoomIn()} className="w-12 h-12 flex items-center justify-center text-slate-600 border-b border-slate-100"><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
+                <button onClick={() => map.zoomOut()} className="w-12 h-12 flex items-center justify-center text-slate-600"><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M19.5 12h-15" /></svg></button>
             </div>
         </div>
     );
 };
 
-// --- 2. MARCADOR DO USUÁRIO ---
 const MarcadorUsuario = ({ posicao }) => {
     if (!posicao) return null;
-    const iconeGPS = L.divIcon({
-        className: 'bg-transparent',
-        html: `
-      <div class="flex items-center justify-center relative w-16 h-16 -ml-4 -mt-4">
-        <div class="absolute w-12 h-12 bg-blue-500/30 rounded-full animate-pulse"></div>
-        <div class="relative w-5 h-5 bg-blue-600 border-[3px] border-white rounded-full shadow-lg z-10"></div>
-      </div>
-    `,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
-    });
+    const iconeGPS = L.divIcon({ className: 'bg-transparent', html: `<div class="flex items-center justify-center relative w-16 h-16 -ml-4 -mt-4"><div class="absolute w-12 h-12 bg-blue-500/30 rounded-full animate-pulse"></div><div class="relative w-5 h-5 bg-blue-600 border-[3px] border-white rounded-full shadow-lg z-10"></div></div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
     return <Marker position={posicao} icon={iconeGPS}><Popup>Você está aqui</Popup></Marker>;
 };
 
-// --- 3. COMPONENTE DA QUADRA ---
 const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar }) => {
     const alternarQuadra = async () => {
         if (!podeEditar) return;
@@ -114,44 +87,25 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar }) => {
         if (isFeita) await updateDoc(docRef, { quadras_feitas: arrayRemove(quadra.id) });
         else await updateDoc(docRef, { quadras_feitas: arrayUnion(quadra.id) });
     };
-
     return (
-        <CircleMarker
-            center={[quadra.lat, quadra.lng]}
-            pathOptions={{
-                color: isFeita ? '#166534' : '#b91c1c',
-                fillColor: isFeita ? '#22c55e' : '#ef4444',
-                fillOpacity: podeEditar ? 1 : 0.4,
-                weight: 2,
-                opacity: podeEditar ? 1 : 0.4
-            }}
-            radius={15}
-            eventHandlers={{ click: alternarQuadra }}
-        >
-            <Tooltip direction="center" permanent className="sem-fundo">{quadra.id}</Tooltip>
+        <CircleMarker center={[quadra.lat, quadra.lng]} pathOptions={{ color: isFeita ? '#166534' : '#b91c1c', fillColor: isFeita ? '#22c55e' : '#ef4444', fillOpacity: 1, weight: 2 }} radius={16} eventHandlers={{ click: alternarQuadra }}>
+            <Tooltip direction="center" permanent className="sem-fundo"><span className="font-bold text-white text-[20px]">{quadra.id}</span></Tooltip> 
         </CircleMarker>
     );
 };
 
-// --- 4. COMPONENTE DO TERRITÓRIO (COM LÓGICA DE CALOR) ---
+// --- TERRITÓRIO DETALHADO ---
 const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, listaUsuarios }) => {
-    const [dadosBanco, setDadosBanco] = useState({
-        status: 'aberto',
-        quadras_feitas: [],
-        designadoPara: null,
-        designadoNome: null,
-        dataDesignacao: null,
-        ultimaConclusao: null // <--- NOVO CAMPO
-    });
+    const [dadosBanco, setDadosBanco] = useState({ status: 'aberto', quadras_feitas: [], designadoPara: null, designadoNome: null, ultimaConclusao: null });
+    const [usuarioSelecionado, setUsuarioSelecionado] = useState(""); // Começa vazio (Livre/Devolver)
+    const [msgPronta, setMsgPronta] = useState(null);
+    const [posicaoClique, setPosicaoClique] = useState(null);
 
-    const [usuarioSelecionado, setUsuarioSelecionado] = useState("");
-
-    const listaQuadras = (dados.properties.pontos || []).map((p, index) => ({
-        id: index + 1, lat: p.lat, lng: p.lng, nomeOriginal: p.nome
-    }));
-
-    const nome = dados.properties.nome || `Território ${idTerritorio}`;
-    const posicoes = dados.geometry.coordinates[0].map(coord => [coord[1], coord[0]]);
+    const listaQuadras = (dados.properties.pontos || []).map((p, index) => ({ id: index + 1, lat: p.lat, lng: p.lng }));
+    const nome = dados.properties.nome || `T-${idTerritorio}`;
+    const coords = dados.geometry.coordinates[0];
+    const posicoes = coords.map(coord => [coord[1], coord[0]]);
+    const centro = calcularCentroide(coords);
 
     useEffect(() => {
         const idSeguro = `t_${idTerritorio}`;
@@ -159,11 +113,11 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             if (docSnapshot.exists()) {
                 const data = docSnapshot.data();
                 setDadosBanco(data);
-                if (data.designadoPara) setUsuarioSelecionado(data.designadoPara);
-                else setUsuarioSelecionado("");
-            } else {
-                setDoc(docSnapshot.ref, { status: 'aberto', nome: nome, quadras_feitas: [] });
-            }
+                // IMPORTANTE: NÃO setamos o usuarioSelecionado aqui. 
+                // Deixamos vazio "" para que o dropdown sempre inicie na opção de "Devolver/Livre".
+                // O responsável atual será mostrado em um label separado.
+                setUsuarioSelecionado("");
+            } else { setDoc(docSnapshot.ref, { status: 'aberto', nome: nome, quadras_feitas: [] }); }
         });
         return () => unsub();
     }, [idTerritorio, nome]);
@@ -172,196 +126,234 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const donoDoTerritorio = dadosBanco.designadoPara;
     const isMeu = donoDoTerritorio === usuarioAtual;
     const isOcupado = donoDoTerritorio && !isMeu;
-    const podeEditar = isAdmin || isMeu;
-
+    const isCompleto = listaQuadras.length > 0 && dadosBanco.quadras_feitas?.length === listaQuadras.length;
+    const feitas = dadosBanco.quadras_feitas?.length || 0;
     const total = listaQuadras.length;
-    const feitas = dadosBanco.quadras_feitas ? dadosBanco.quadras_feitas.length : 0;
     const porcentagem = total > 0 ? (feitas / total) * 100 : 0;
-    const isCompleto = total > 0 && feitas === total;
-    const deveMostrarQuadras = zoomLevel >= 15 && (isAdmin || isMeu);
+    const deveMostrarQuadras = zoomLevel >= 16 && (isAdmin || isMeu); // numero maior mais perto, definir bolinhas
 
-    // --- CÁLCULO DE TEMPO (HEATMAP) ---
+    // --- Lógica de Tempo e Cores (Heatmap 4 tons) ---
     let diasSemTrabalhar = 0;
-    let textoTempo = "";
-
+    let textoTempo = "Nunca";
     if (dadosBanco.ultimaConclusao) {
         const dataUltima = dadosBanco.ultimaConclusao.toDate ? dadosBanco.ultimaConclusao.toDate() : new Date(dadosBanco.ultimaConclusao);
-        const diffTime = Math.abs(new Date() - dataUltima);
-        diasSemTrabalhar = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        if (diasSemTrabalhar > 60) textoTempo = `${Math.floor(diasSemTrabalhar / 30)} meses`;
-        else textoTempo = `${diasSemTrabalhar} dias`;
-    } else {
-        // Se nunca foi trabalhado ou não tem data
-        diasSemTrabalhar = 999;
-        textoTempo = "Nunca";
+        diasSemTrabalhar = Math.ceil(Math.abs(new Date() - dataUltima) / (1000 * 60 * 60 * 24));
+        textoTempo = diasSemTrabalhar > 60 ? `${Math.floor(diasSemTrabalhar / 30)} meses` : `${diasSemTrabalhar} dias`;
     }
 
-    // --- LÓGICA DE CORES AVANÇADA ---
-    let corPreenchimento = '#fed7aa'; // Laranja Muito Claro (Padrão Recente)
-    let corBorda = '#c2410c';
-    let pesoBorda = 1;
-    let opacidade = 0.5;
-
-    if (isCompleto) {
-        corPreenchimento = '#22c55e'; // Verde
-        corBorda = '#15803d';
-        pesoBorda = isMeu ? 3 : 1;
-        opacidade = 0.6;
-    } else if (isMeu) {
-        if (isAdmin) { corPreenchimento = '#a855f7'; corBorda = '#6b21a8'; }
-        else { corPreenchimento = '#3b82f6'; corBorda = '#1e40af'; }
-        pesoBorda = 3;
-        opacidade = 0.5;
-    } else if (isOcupado) {
-        corPreenchimento = '#9ca3af'; // Cinza
-        corBorda = '#4b5563';
-        opacidade = 0.4;
-    } else {
-        // --- É LIVRE (Aplicar Heatmap apenas para Admin) ---
-        if (isAdmin) {
-            if (diasSemTrabalhar > 180) corPreenchimento = '#ef4444'; // Vermelho (Urgente > 6 meses)
-            else if (diasSemTrabalhar > 90) corPreenchimento = '#f97316'; // Laranja Forte (> 3 meses)
-            else if (diasSemTrabalhar > 30) corPreenchimento = '#fdba74'; // Laranja Médio (> 1 mês)
-            else corPreenchimento = '#fed7aa'; // Laranja Claro (Recente)
-        } else {
-            // Para usuário comum, laranja padrão para não confundir
-            corPreenchimento = '#fdba74';
-        }
+    let corPreenchimento = '#fed7aa'; let corBorda = '#c2410c'; let pesoBorda = 1; let opacidade = 0.5;
+    if (isCompleto) { corPreenchimento = '#22c55e'; corBorda = '#15803d'; opacidade = 0.6; if (isMeu) pesoBorda = 3; }
+    else if (isMeu) { corPreenchimento = '#3b82f6'; corBorda = '#1e40af'; pesoBorda = 3; if (isAdmin) { corPreenchimento = '#a855f7'; corBorda = '#6b21a8'; } }
+    else if (isOcupado) { corPreenchimento = '#9ca3af'; corBorda = '#4b5563'; opacidade = 0.4; }
+    else {
+        if (diasSemTrabalhar > 180) corPreenchimento = '#ea580c';
+        else if (diasSemTrabalhar > 120) corPreenchimento = '#f97316';
+        else if (diasSemTrabalhar > 60) corPreenchimento = '#fb923c';
+        else corPreenchimento = '#fed7aa';
     }
+
+    const gerarLinkMsg = (uNome, uWhats) => {
+        const baseUrl = window.location.href.split('?')[0].split('#')[0] + '#/app';
+        const linkInterno = `${baseUrl}?lat=${centro.lat}&lng=${centro.lng}&z=18`;
+        const textoMsg = `Olá *${uNome}*! 🗺️\nO território *${nome}* foi designado para você.\n\n📍 *Acesse pelo App:* ${linkInterno}\n\nBom trabalho!`;
+        return { texto: textoMsg, whatsapp: uWhats, nome: uNome };
+    };
 
     const salvarDesignacao = async () => {
         const idSeguro = `t_${idTerritorio}`;
+
+        // Se usuarioSelecionado é vazio, significa "Devolver"
         if (!usuarioSelecionado) {
-            // DEVOLVER / LIBERAR
-            if (!confirm("Remover a designação e liberar o território?")) return;
+            // Se já estava livre, não faz nada
+            if (!dadosBanco.designadoPara) return;
 
-            const updateData = {
-                designadoPara: null,
-                designadoNome: null,
-                dataDesignacao: null
-            };
-
-            // SE ESTIVER COMPLETO AO DEVOLVER, SALVA DATA E RESETA
-            if (isCompleto) {
-                updateData.ultimaConclusao = new Date(); // Salva hoje como data de conclusão
-                updateData.quadras_feitas = []; // Reseta as bolinhas
-            }
-
+            if (!confirm("Confirmar devolução do território?")) return;
+            const updateData = { designadoPara: null, designadoNome: null, dataDesignacao: null };
+            if (isCompleto) { updateData.ultimaConclusao = new Date(); updateData.quadras_feitas = []; }
             await updateDoc(doc(db, "territorios", idSeguro), updateData);
+            setMsgPronta(null);
             return;
         }
 
-        // DESIGNAR
+        // Se selecionou alguém
         const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
-        const nomeUsuario = usuarioObj ? usuarioObj.nome : "Usuário";
-        await updateDoc(doc(db, "territorios", idSeguro), {
-            designadoPara: usuarioSelecionado,
-            designadoNome: nomeUsuario,
-            dataDesignacao: new Date()
-        });
+        const nomeUsuario = usuarioObj ? usuarioObj.nome : "Dirigente";
+        await updateDoc(doc(db, "territorios", idSeguro), { designadoPara: usuarioSelecionado, designadoNome: nomeUsuario, dataDesignacao: new Date() });
+        const msg = gerarLinkMsg(nomeUsuario, usuarioObj?.whatsapp);
+        setMsgPronta(msg);
     };
+
+    const reenviarMsgAtual = () => {
+        const usuarioObj = listaUsuarios.find(u => u.email === dadosBanco.designadoPara);
+        const msg = gerarLinkMsg(dadosBanco.designadoNome, usuarioObj?.whatsapp);
+        setMsgPronta(msg);
+    };
+
+    const abrirWhatsapp = () => {
+        if (!msgPronta) return;
+        const textoEncoded = encodeURIComponent(msgPronta.texto);
+        const url = msgPronta.whatsapp ? `https://wa.me/${msgPronta.whatsapp.replace(/\D/g, '')}?text=${textoEncoded}` : `https://wa.me/?text=${textoEncoded}`;
+        window.open(url, '_blank');
+        setMsgPronta(null);
+    };
+
+    const compartilharPontoEncontro = () => {
+        const ponto = posicaoClique || centro;
+        const linkGoogle = `http://googleusercontent.com/maps.google.com/maps?q=${ponto.lat},${ponto.lng}`;
+        const texto = `📍 *Ponto de Encontro* para o território *${nome}*:\n\n${linkGoogle}`;
+        const textoEncoded = encodeURIComponent(texto);
+        window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
+    };
+
+    // --- LÓGICA DO BOTÃO E ESTADO ---
+    const isCurrentlyAssigned = !!dadosBanco.designadoPara; // Tem dono atualmente?
+    const isSelectingToFree = !usuarioSelecionado; // Selecionou "Devolver"?
+
+    // Se tem dono e selecionei livre -> Ação de Devolver
+    // Se não tem dono e selecionei livre -> Inativo
+    // Se selecionei alguém -> Ação de Salvar
 
     return (
         <>
             <Polygon
                 positions={posicoes}
                 pathOptions={{ color: corBorda, weight: pesoBorda, fillColor: corPreenchimento, fillOpacity: opacidade }}
+                eventHandlers={{ click: (e) => setPosicaoClique(e.latlng) }}
             >
                 <Popup>
-                    <div className="min-w-[240px] p-1">
-                        <strong className="text-sm uppercase tracking-wide text-gray-800 block mb-2 text-center">{nome}</strong>
-
-                        {/* Informação de Última Conclusão */}
-                        {dadosBanco.ultimaConclusao && (
-                            <div className="text-center text-[10px] text-gray-400 mb-2">
-                                Trabalhado pela última vez há: <strong>{textoTempo}</strong>
-                            </div>
-                        )}
-
-                        <div className="flex justify-between text-xs text-gray-500 mb-1">
-                            <span>Progresso</span><span>{feitas}/{total}</span>
+                    <div className="min-w-[260px] p-1 font-sans">
+                        <div className="border-b border-gray-200 pb-2 mb-2 text-center">
+                            <strong className="text-lg font-bold text-gray-800 block">{nome}</strong>
+                            {dadosBanco.ultimaConclusao && <span className="text-[10px] text-gray-500 uppercase">Última vez: {textoTempo} atrás</span>}
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
-                            <div className={`h-2 rounded-full transition-all duration-500 ${isCompleto ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${porcentagem}%` }}></div>
+                        <div className="mb-3">
+                            <div className="flex justify-between text-xs text-gray-600 mb-1 font-medium"><span>{feitas} de {total} quadras</span><span>{Math.round(porcentagem)}%</span></div>
+                            <div className="w-full bg-gray-200 rounded-full h-2 border border-gray-300 overflow-hidden"><div className={`h-full transition-all duration-500 ${isCompleto ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${porcentagem}%` }}></div></div>
                         </div>
-                        <hr className="border-gray-200 mb-3" />
 
                         {isAdmin ? (
-                            <div className="bg-gray-50 p-3 rounded border border-gray-200 shadow-sm">
-                                {isCompleto && <div className="mb-2 p-1.5 bg-green-100 text-green-700 text-xs rounded text-center font-bold border border-green-200">✅ CONCLUÍDO</div>}
-                                {isMeu && !isCompleto && <div className="mb-2 p-1.5 bg-purple-100 text-purple-700 text-xs rounded text-center font-bold border border-purple-200">SEU TERRITÓRIO</div>}
-                                {isOcupado && <div className="mb-2 text-xs text-center text-gray-500">Com: <strong>{dadosBanco.designadoNome}</strong></div>}
+                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                                {msgPronta ? (
+                                    <div className="animate-fade-in flex flex-col gap-2">
+                                        <div className="text-xs text-center text-green-700 font-bold bg-green-100 p-2 rounded">Território com {msgPronta.nome}</div>
+                                        <button onClick={abrirWhatsapp} className="popup-btn-action bg-green-600 text-white hover:bg-green-700">
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0012.04 2z" /></svg>
+                                            {msgPronta.whatsapp ? "Enviar no WhatsApp" : "Compartilhar Link"}
+                                        </button>
+                                        <button onClick={() => setMsgPronta(null)} className="text-xs text-gray-400 underline text-center mt-1">Voltar</button>
+                                    </div>
+                                ) : (
+                                    <div className="animate-fade-in">
 
-                                <div className="flex gap-1 mt-2">
-                                    <select
-                                        className="w-full p-1 text-sm bg-white border border-gray-300 rounded focus:outline-none"
-                                        value={usuarioSelecionado}
-                                        onChange={(e) => setUsuarioSelecionado(e.target.value)}
-                                    >
-                                        <option value="">-- Devolver / Livre --</option>
-                                        {listaUsuarios.map(u => (
-                                            <option key={u.email} value={u.email} className={u.email === user.email ? "font-bold text-blue-600" : ""}>
-                                                {u.nome || u.email} {u.email === user.email ? "(Você)" : ""}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <button onClick={salvarDesignacao} className="bg-blue-600 text-white px-3 rounded font-bold">OK</button>
-                                </div>
-                                {/* Dica para o Admin sobre a devolução */}
-                                {isCompleto && usuarioSelecionado === "" && (
-                                    <p className="text-[9px] text-orange-600 mt-1 text-center">
-                                        *Ao devolver completo, o progresso será resetado e a data atual salva.
-                                    </p>
+                                        {/* EXIBIÇÃO: RESPONSÁVEL ATUAL (SEPARADO DO INPUT) */}
+                                        <div className="mb-2 p-2 bg-white rounded border border-slate-200 shadow-sm text-center">
+                                            <span className="text-[10px] text-slate-400 font-bold uppercase block">Responsável Atual</span>
+                                            {dadosBanco.designadoPara ? (
+                                                <span className="text-sm font-bold text-blue-700 block truncate">{dadosBanco.designadoNome}</span>
+                                            ) : (
+                                                <span className="text-sm font-bold text-green-600 block">Livre (Disponível)</span>
+                                            )}
+                                        </div>
+
+                                        {/* AÇÃO: SELECT */}
+                                        <label className="text-[10px] uppercase font-bold text-gray-400 mb-1 block">Ação / Alterar para:</label>
+                                        <select
+                                            className="w-full p-2 mb-2 text-sm bg-white border border-gray-300 rounded focus:border-blue-500 outline-none"
+                                            value={usuarioSelecionado}
+                                            onChange={(e) => setUsuarioSelecionado(e.target.value)}
+                                        >
+                                            <option value="">-- Devolver (Livre) --</option>
+                                            {listaUsuarios.map(u => (
+                                                <option key={u.email} value={u.email} className={u.email === user.email ? "font-bold text-blue-600" : ""}>
+                                                    {u.nome} {u.whatsapp ? "📱" : ""}
+                                                </option>
+                                            ))}
+                                        </select>
+
+                                        {/* BOTÃO INTELIGENTE */}
+                                        <button
+                                            onClick={salvarDesignacao}
+                                            disabled={!isCurrentlyAssigned && isSelectingToFree} // Desabilita se já for livre e estiver selecionado "Livre"
+                                            className={`popup-btn-action text-white mb-2 ${!isCurrentlyAssigned && isSelectingToFree ? 'bg-gray-300 cursor-not-allowed text-gray-500' :
+                                                    isSelectingToFree ? 'bg-red-500 hover:bg-red-600' : // É Devolução
+                                                        'bg-blue-600 hover:bg-blue-700' // É Designação
+                                                }`}
+                                        >
+                                            {!isCurrentlyAssigned && isSelectingToFree ? "Já está Disponível" :
+                                                isSelectingToFree ? "Confirmar Devolução" :
+                                                    "Salvar Designação"}
+                                        </button>
+
+                                        {/* AÇÕES ADICIONAIS (Se tiver dono) */}
+                                        {donoDoTerritorio && (
+                                            <button onClick={reenviarMsgAtual} className="popup-btn-action bg-white border border-green-600 text-green-700 hover:bg-green-50 text-xs py-1">
+                                                Compartilhar Novamente
+                                            </button>
+                                        )}
+
+                                        {/* PONTO DE ENCONTRO (Se for Admin e dono) */}
+                                        {isMeu && (
+                                            <div className="pt-2 mt-2 border-t border-gray-200">
+                                                <button onClick={compartilharPontoEncontro} className="popup-btn-action bg-green-600 text-white hover:bg-green-700 shadow-md w-full">
+                                                    Compartilhar este ponto de encontro
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                         ) : (
-                            <div className="text-center">
-                                {isCompleto ? (
-                                    <div className="bg-green-50 text-green-700 p-2 rounded text-xs border border-green-200 font-bold">🎉 Concluído!</div>
-                                ) : isMeu ? (
-                                    <div className="bg-blue-50 text-blue-700 p-2 rounded text-xs border border-blue-200 font-medium">Seu Território</div>
+                            <div className="text-center mt-2 flex flex-col gap-2">
+                                {isMeu ? (
+                                    <>
+                                        <div className="bg-blue-50 text-blue-700 p-2 rounded text-xs font-bold border border-blue-100">👋 Este é o seu território.</div>
+                                        <button onClick={compartilharPontoEncontro} className="popup-btn-action bg-green-600 text-white hover:bg-green-700 shadow-md">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                            Compartilhar este ponto de encontro
+                                        </button>
+                                        <p className="text-[9px] text-gray-400">O link será do local exato onde você clicou.</p>
+                                    </>
                                 ) : isOcupado ? (
-                                    <div className="text-xs text-gray-500 bg-gray-100 p-2 rounded border border-gray-200">Dirigente: <strong>{dadosBanco.designadoNome}</strong></div>
+                                    <div className="text-xs text-gray-500 bg-gray-100 p-2 rounded border border-gray-200">Responsável: <strong className="text-gray-700">{dadosBanco.designadoNome}</strong></div>
                                 ) : (
-                                    <div className="text-xs text-orange-600 bg-orange-50 border border-orange-100 p-2 rounded font-medium">Disponível</div>
+                                    <div className="text-xs text-orange-600 bg-orange-50 p-2 rounded border border-orange-100 font-medium">Disponível para trabalho.</div>
                                 )}
                             </div>
                         )}
                     </div>
                 </Popup>
-
-                {/* TEXTO DE PRIORIDADE (Só aparece para o Admin e se estiver Livre) */}
-                {isAdmin && !isOcupado && !isMeu && !isCompleto && (
-                    <Tooltip permanent direction="center" className="label-prioridade">
-                        <span className="font-bold text-xs" style={{ color: '#4a044e', textShadow: '0 0 3px white' }}>
-                            {textoTempo}
-                        </span>
+                {zoomLevel > 13 && (
+                    <Tooltip permanent direction="center" className="label-territorio">
+                        <span className="label-nome">{nome}</span>
+                        {!isOcupado && !isCompleto && <><span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca feito"}</span><span className="label-tempo">{textoTempo}</span></>}
+                        {isOcupado && <span className="label-status" style={{ color: '#666' }}>Ocupado</span>}
+                        {isCompleto && <span className="label-status" style={{ color: '#166534', background: '#dcfce7' }}>Feito!</span>}
                     </Tooltip>
                 )}
-
             </Polygon>
-
             {deveMostrarQuadras && listaQuadras.map(quadra => (
-                <QuadraMarker key={quadra.id} quadra={quadra} idTerritorio={idTerritorio} isFeita={dadosBanco.quadras_feitas?.includes(quadra.id)} podeEditar={podeEditar} />
+                <QuadraMarker key={quadra.id} quadra={quadra} idTerritorio={idTerritorio} isFeita={dadosBanco.quadras_feitas?.includes(quadra.id)} podeEditar={isAdmin || isMeu} />
             ))}
         </>
     );
 };
 
-// --- 5. MAPA PRINCIPAL ---
+// --- 6. MAPA PRINCIPAL ---
 const Mapa = ({ user, isAdmin }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
     const [zoomLevel, setZoomLevel] = useState(14);
     const [listaUsuarios, setListaUsuarios] = useState([]);
     const [posicaoUsuario, setPosicaoUsuario] = useState(null);
+    const [tipoMapa, setTipoMapa] = useState('padrao');
 
     useEffect(() => {
         fetch('./mapa.json').then(res => res.json()).then(data => setGeoJsonData(data));
         const carregarUsuarios = async () => {
             try {
                 const query = await getDocs(collection(db, "usuarios"));
-                const lista = query.docs.map(doc => ({ email: doc.id, nome: doc.data().nome || "Sem Nome", role: doc.data().role }));
+                const lista = query.docs.map(doc => ({
+                    email: doc.id, nome: doc.data().nome || "Sem Nome", role: doc.data().role, whatsapp: doc.data().whatsapp
+                }));
                 lista.sort((a, b) => a.nome.localeCompare(b.nome));
                 setListaUsuarios(lista);
             } catch (e) { console.error(e); }
@@ -374,19 +366,17 @@ const Mapa = ({ user, isAdmin }) => {
         return null;
     };
 
-    // INJEÇÃO DE CSS DENTRO DO COMPONENTE PARA O TOOLTIP FUNCIONAR SEM ARQUIVO EXTERNO
     return (
         <div className="h-full w-full relative">
-            <style>{cssTooltip}</style> {/* Injeta o CSS do Tooltip */}
-
+            <style>{cssTooltip}</style>
             {!geoJsonData ? (
-                <div className="flex h-full items-center justify-center bg-gray-100">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                </div>
+                <div className="flex h-full items-center justify-center bg-gray-100"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>
             ) : (
                 <MapContainer center={[-26.485, -51.995]} zoom={14} zoomControl={false} className="h-full w-full z-0">
-                    <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                     <MapEvents />
+                    <DeepLinkHandler />
+                    {tipoMapa === 'padrao' ? <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /> : <TileLayer attribution='© Esri' url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />}
+                    <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} />
                     <ControlesNavegacao setPosicaoUsuario={setPosicaoUsuario} />
                     <MarcadorUsuario posicao={posicaoUsuario} />
                     {geoJsonData.features.map((feature, index) => {
