@@ -5,9 +5,10 @@ import { auth, googleProvider } from './firebase';
 import Mapa from './Mapa';
 import { useUsuario } from './useUsuario';
 import AdminPanel from './AdminPanel';
-import Relatorios from './Relatorios'; 
+import Relatorios from './Relatorios';
 import appInfo from './version.json';
 import AutoUpdate from './AutoUpdate';
+import AjudaModal from './AjudaModal';
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 // Isso garante que pegamos o evento mesmo antes do React renderizar qualquer coisa
@@ -140,7 +141,7 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
 };
 
 // --- MENU LATERAL ---
-const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout }) => {
+const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda }) => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   useEffect(() => {
@@ -189,9 +190,10 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout })
         ></div>
       )}
 
-      <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[51] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+      {/* Adicionado flex flex-col para permitir o rodapé fixo */}
+      <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[51] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
 
-        <div className="bg-blue-600 p-6 text-white">
+        <div className="bg-blue-600 p-6 text-white flex-shrink-0">
           <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -212,13 +214,22 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout })
           </span>
         </div>
 
-        <div className="p-4 flex flex-col gap-2 flex-1">
+        {/* Corpo do menu com scroll e flex-1 para empurrar o rodapé */}
+        <div className="p-4 flex flex-col gap-2 flex-1 overflow-y-auto">
 
           <button onClick={() => { navigate('/app'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 text-blue-700 font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
             </svg>
             Mapa
+          </button>
+
+          {/* BOTÃO AJUDA */}
+          <button onClick={() => { abrirAjuda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-yellow-50 text-yellow-700 transition-colors font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            Como usar (Ajuda)
           </button>
 
           {isAdmin && (
@@ -233,7 +244,6 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout })
                 Gerenciar Usuários
               </button>
 
-              {/* NOVA OPÇÃO: RELATÓRIOS */}
               <button
                 onClick={() => { navigate('/relatorios'); onClose(); }}
                 className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors"
@@ -274,8 +284,8 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout })
 
         </div>
 
-        {/* RODAPÉ COM VERSÃO AUTOMÁTICA */}
-        <div className="p-4 text-center text-[10px] text-gray-300 bg-gray-50 border-t border-gray-100">
+        {/* RODAPÉ COM VERSÃO (Fixed at bottom) */}
+        <div className="p-4 text-center text-[10px] text-gray-300 bg-gray-50 border-t border-gray-100 flex-shrink-0">
           <p>Territórios Digitais v{appInfo.version}</p>
           <p className="opacity-70">Atualizado em: {appInfo.buildDate}</p>
           <p className="mt-1">Desenvolvido com carinho ❤️</p>
@@ -293,6 +303,7 @@ function Dashboard() {
   const [verificandoLogin, setVerificandoLogin] = useState(true);
   const [menuAberto, setMenuAberto] = useState(false);
   const [legendaAberta, setLegendaAberta] = useState(false);
+  const [ajudaAberta, setAjudaAberta] = useState(false); // Estado do Modal de Ajuda
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -347,11 +358,19 @@ function Dashboard() {
         isAdmin={isAdmin}
         navigate={navigate}
         handleLogout={handleLogout}
+        abrirAjuda={() => setAjudaAberta(true)}
       />
 
       <LegendaModal
         isOpen={legendaAberta}
         onClose={() => setLegendaAberta(false)}
+        isAdmin={isAdmin}
+      />
+
+      {/* RENDERIZA O MODAL DE AJUDA */}
+      <AjudaModal
+        isOpen={ajudaAberta}
+        onClose={() => setAjudaAberta(false)}
         isAdmin={isAdmin}
       />
 
@@ -362,6 +381,21 @@ function Dashboard() {
         </div>
 
         <div className="flex items-center gap-4">
+
+          {/* ATALHO DE RELATÓRIOS (SÓ PARA ADMIN) */}
+          {isAdmin && (
+            <button
+              onClick={() => navigate('/relatorios')}
+              className="w-9 h-9 bg-blue-500 hover:bg-blue-400 text-white rounded-full flex items-center justify-center shadow transition-colors active:scale-95"
+              title="Relatórios"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+                <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+              </svg>
+            </button>
+          )}
+
           <button
             onClick={() => setLegendaAberta(true)}
             className="w-9 h-9 bg-white text-blue-600 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-transform"

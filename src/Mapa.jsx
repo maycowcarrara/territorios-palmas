@@ -78,7 +78,7 @@ const MarcadorUsuario = ({ posicao }) => {
 
     // Função para compartilhar a localização atual
     const compartilharLocalizacao = () => {
-        // CORREÇÃO: Link padrão universal do Google Maps
+        // Link padrão universal do Google Maps
         const linkGoogle = `https://www.google.com/maps?q=${posicao.lat},${posicao.lng}`;
         const texto = `*Estou aqui:*\n\n${linkGoogle}`;
         const textoEncoded = encodeURIComponent(texto);
@@ -183,18 +183,49 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     const salvarDesignacao = async () => {
         const idSeguro = `t_${idTerritorio}`;
+
+        // --- LÓGICA DE DEVOLUÇÃO (SALVANDO HISTÓRICO) ---
         if (!usuarioSelecionado) {
-            if (!dadosBanco.designadoPara) return;
+            if (!dadosBanco.designadoPara) return; // Já está livre
+
             if (!confirm("Confirmar devolução do território?")) return;
-            const updateData = { designadoPara: null, designadoNome: null, dataDesignacao: null };
-            if (isCompleto) { updateData.ultimaConclusao = new Date(); updateData.quadras_feitas = []; }
+
+            // 1. Cria o objeto do histórico atual antes de limpar
+            const registroHistorico = {
+                responsavel: dadosBanco.designadoNome,
+                email: dadosBanco.designadoPara,
+                dataRetirada: dadosBanco.dataDesignacao || new Date(), // Pega a data que ele pegou
+                dataDevolucao: new Date() // Data de agora
+            };
+
+            const updateData = {
+                designadoPara: null,
+                designadoNome: null,
+                dataDesignacao: null,
+                // Adiciona o registro ao array 'historico' no banco de dados
+                historico: arrayUnion(registroHistorico)
+            };
+
+            if (isCompleto) {
+                updateData.ultimaConclusao = new Date();
+                updateData.quadras_feitas = [];
+            }
+
             await updateDoc(doc(db, "territorios", idSeguro), updateData);
             setMsgPronta(null);
             return;
         }
+
+        // --- LÓGICA DE DESIGNAÇÃO (NORMAL) ---
         const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
         const nomeUsuario = usuarioObj ? usuarioObj.nome : "Dirigente";
-        await updateDoc(doc(db, "territorios", idSeguro), { designadoPara: usuarioSelecionado, designadoNome: nomeUsuario, dataDesignacao: new Date() });
+
+        await updateDoc(doc(db, "territorios", idSeguro), {
+            designadoPara: usuarioSelecionado,
+            designadoNome: nomeUsuario,
+            dataDesignacao: new Date()
+        });
+
         const msg = gerarLinkMsg(nomeUsuario, usuarioObj?.whatsapp);
         setMsgPronta(msg);
     };
