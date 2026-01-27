@@ -85,7 +85,7 @@ function Login() {
 const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm animate-fade-in" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-2">
           <h3 className="text-lg font-bold text-gray-800">Legenda do Mapa</h3>
@@ -185,13 +185,13 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
     <>
       {isOpen && (
         <div
-          className="fixed inset-0 z-[50] bg-black/50 transition-opacity"
+          className="fixed inset-0 z-[2000] bg-black/50 transition-opacity"
           onClick={onClose}
         ></div>
       )}
 
       {/* Adicionado flex flex-col para permitir o rodapé fixo */}
-      <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[51] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
+      <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[2001] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
 
         <div className="bg-blue-600 p-6 text-white flex-shrink-0">
           <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white">

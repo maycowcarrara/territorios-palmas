@@ -454,7 +454,7 @@ const Mapa = ({ user, isAdmin }) => {
                 <MapContainer
                     center={[-26.485, -51.995]}
                     zoom={14}
-                    maxZoom={21}
+                    maxZoom={20}
                     zoomControl={false}
                     className="h-full w-full z-0"
                 >
@@ -467,7 +467,7 @@ const Mapa = ({ user, isAdmin }) => {
                             attribution='© OpenStreetMap'
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                             maxNativeZoom={19} /* O OSM só vai até 19 de verdade */
-                            maxZoom={21}       /* Permitimos ir até 22 esticando a imagem */
+                            maxZoom={20}       /* Permitimos ir até 20 esticando a imagem */
                         />
                     )}
 
@@ -477,7 +477,7 @@ const Mapa = ({ user, isAdmin }) => {
                             attribution='© Google Maps'
                             url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
                             maxNativeZoom={20} /* O Google tem ótima qualidade até o 20 */
-                            maxZoom={21}       /* Permitimos aproximar mais um pouco */
+                            maxZoom={20}       /* Permitimos aproximar mais um pouco */
                         />
                     )}
 

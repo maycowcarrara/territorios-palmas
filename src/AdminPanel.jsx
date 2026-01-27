@@ -26,14 +26,24 @@ const AdminPanel = () => {
     const handleAdicionar = async (e) => {
         e.preventDefault();
         if (!novoEmail) return;
-        await setDoc(doc(db, "usuarios", novoEmail), {
-            role: 'comum',
-            nome: 'Dirigente Novo',
-            whatsapp: novoWhats || '',
-            criadoEm: new Date()
-        });
-        setNovoEmail('');
-        setNovoWhats('');
+
+        // Tratamento simples para evitar erros de digitação
+        const emailFormatado = novoEmail.trim().toLowerCase();
+
+        try {
+            await setDoc(doc(db, "usuarios", emailFormatado), {
+                role: 'comum',
+                nome: 'Dirigente Novo', // Nome provisório até ele logar
+                whatsapp: novoWhats || '',
+                criadoEm: new Date()
+            });
+            setNovoEmail('');
+            setNovoWhats('');
+            alert("Usuário pré-aprovado com sucesso!");
+        } catch (error) {
+            console.error("Erro ao adicionar:", error);
+            alert("Erro ao adicionar usuário. Verifique se você tem permissão.");
+        }
     };
 
     const mudarRole = async (email, novaRole) => {
