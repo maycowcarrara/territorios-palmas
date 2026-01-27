@@ -6,6 +6,7 @@ import { db } from './firebase';
 import L from 'leaflet';
 
 // --- CSS ---
+// Atualizei a classe .thumb-satelite abaixo para ter fundo azul espacial e estrelas ✨
 const cssTooltip = `
   .label-territorio { background: transparent; border: none; box-shadow: none; font-family: 'Bahnschrift', sans-serif-condensed, sans-serif; text-align: center; line-height: 1.1; pointer-events: none; }
   .label-nome { font-weight: 700; font-size: 14px; color: #1e3a8a; text-shadow: 2px 0 #fff, -2px 0 #fff, 0 2px #fff, 0 -2px #fff, 1px 1px #fff, -1px -1px #fff; display: block; font-stretch: condensed; letter-spacing: -0.5px; margin-bottom: 2px; }
@@ -15,8 +16,37 @@ const cssTooltip = `
   .map-layer-btn { width: 48px; height: 48px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s, border-color 0.2s; overflow: hidden; position: relative; background-size: cover; }
   .map-layer-btn:active { transform: scale(0.95); }
   .map-layer-btn.active { border-color: #2563eb; transform: scale(1.05); z-index: 10; }
-  .thumb-rua { background: #e5e7eb; } .thumb-rua::after { content: '🗺️'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; }
-  .thumb-satelite { background: #1a2e05; } .thumb-satelite::after { content: '🛰️'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; }
+  
+  .thumb-rua { background: #e5e7eb; } 
+  .thumb-rua::after { content: '🗺️'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 20px; }
+  
+
+/* SUBSTITUA O BLOCO .thumb-satelite POR ESTE: */
+  .thumb-satelite {
+    background-color: #172554; /* Azul profundo (não preto) */
+    
+    /* Estrelas posicionadas aleatoriamente (X% Y%) */
+    background-image: 
+      radial-gradient(circle at 15% 25%, white 1px, transparent 1.5px),
+      radial-gradient(circle at 75% 15%, rgba(255,255,255,0.8) 1px, transparent 1.5px),
+      radial-gradient(circle at 60% 85%, rgba(255,255,255,0.9) 1px, transparent 1.5px),
+      radial-gradient(circle at 25% 80%, rgba(255,255,255,0.6) 1px, transparent 1.5px),
+      radial-gradient(circle at 85% 65%, rgba(255,255,255,0.7) 1px, transparent 1.5px);
+      
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+  }
+
+  .thumb-satelite::after { 
+    content: '🛰️'; 
+    position: absolute; 
+    top: 50%; 
+    left: 50%; 
+    transform: translate(-50%, -50%); 
+    font-size: 24px; 
+    filter: drop-shadow(0 0 4px rgba(255,255,255,0.5)); /* Brilho no satélite */
+  }
+
   .popup-btn-action { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px; border-radius: 6px; font-weight: bold; font-size: 12px; transition: background-color 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1); cursor: pointer; }
 `;
 
@@ -42,11 +72,20 @@ const DeepLinkHandler = () => {
 };
 
 // --- COMPONENTES DE UI ---
+
+// Botão único de alternância (Toggle)
 const SeletorCamadas = ({ tipoMapa, setTipoMapa }) => {
+    const isPadrao = tipoMapa === 'padrao';
+
+    // Se está no padrão, mostramos o ícone de satélite (para ir p/ satélite).
+    // Se está no satélite, mostramos o ícone de rua (para voltar p/ padrão).
     return (
         <div className="absolute bottom-6 left-4 z-[400] flex flex-col gap-3">
-            <button onClick={() => setTipoMapa('padrao')} className={`map-layer-btn thumb-rua ${tipoMapa === 'padrao' ? 'active' : ''}`} title="Mapa de Ruas" />
-            <button onClick={() => setTipoMapa('satelite')} className={`map-layer-btn thumb-satelite ${tipoMapa === 'satelite' ? 'active' : ''}`} title="Satélite" />
+            <button
+                onClick={() => setTipoMapa(isPadrao ? 'satelite' : 'padrao')}
+                className={`map-layer-btn ${isPadrao ? 'thumb-satelite' : 'thumb-rua'}`}
+                title={isPadrao ? "Mudar para Satélite" : "Mudar para Mapa"}
+            />
         </div>
     );
 };
@@ -76,9 +115,7 @@ const ControlesNavegacao = ({ setPosicaoUsuario }) => {
 const MarcadorUsuario = ({ posicao }) => {
     if (!posicao) return null;
 
-    // Função para compartilhar a localização atual
     const compartilharLocalizacao = () => {
-        // Link padrão universal do Google Maps
         const linkGoogle = `https://www.google.com/maps?q=${posicao.lat},${posicao.lng}`;
         const texto = `*Estou aqui:*\n\n${linkGoogle}`;
         const textoEncoded = encodeURIComponent(texto);
@@ -251,7 +288,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     // --- PONTO DE ENCONTRO ---
     const compartilharPontoEncontro = () => {
         const ponto = posicaoClique || centro;
-        // CORREÇÃO: Link padrão universal do Google Maps
         const linkGoogle = `https://www.google.com/maps?q=${ponto.lat},${ponto.lng}`;
         const texto = `*Ponto de Encontro* para o território *${nome}*:\n\n${linkGoogle}`;
         const textoEncoded = encodeURIComponent(texto);
@@ -415,10 +451,36 @@ const Mapa = ({ user, isAdmin }) => {
             {!geoJsonData ? (
                 <div className="flex h-full items-center justify-center bg-gray-100"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>
             ) : (
-                <MapContainer center={[-26.485, -51.995]} zoom={14} zoomControl={false} className="h-full w-full z-0">
+                <MapContainer
+                    center={[-26.485, -51.995]}
+                    zoom={14}
+                    maxZoom={21}
+                    zoomControl={false}
+                    className="h-full w-full z-0"
+                >
                     <MapEvents />
                     <DeepLinkHandler />
-                    {tipoMapa === 'padrao' ? <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /> : <TileLayer attribution='© Esri' url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />}
+
+                    {/* CAMADA PADRÃO (OpenStreetMap) */}
+                    {tipoMapa === 'padrao' && (
+                        <TileLayer
+                            attribution='© OpenStreetMap'
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            maxNativeZoom={19} /* O OSM só vai até 19 de verdade */
+                            maxZoom={21}       /* Permitimos ir até 22 esticando a imagem */
+                        />
+                    )}
+
+                    {/* CAMADA SATÉLITE HÍBRIDO (Google Hybrid) */}
+                    {tipoMapa === 'satelite' && (
+                        <TileLayer
+                            attribution='© Google Maps'
+                            url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+                            maxNativeZoom={20} /* O Google tem ótima qualidade até o 20 */
+                            maxZoom={21}       /* Permitimos aproximar mais um pouco */
+                        />
+                    )}
+
                     <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} />
                     <ControlesNavegacao setPosicaoUsuario={setPosicaoUsuario} />
                     <MarcadorUsuario posicao={posicaoUsuario} />

@@ -71,8 +71,8 @@ const AjudaModal = ({ isOpen, onClose, isAdmin }) => {
                     Acesse pelo Menu Lateral:
                 </p>
                 <ul className="text-sm list-disc list-inside mt-2 space-y-1 text-slate-600">
-                    <li><strong>Relatórios:</strong> Veja quais territórios estão parados há mais de 4 meses (críticos), filtre por status e exporte PDF para o quadro de anúncios.</li>
-                    <li><strong>Gerenciar Usuários:</strong> Aprove novos cadastros, bloqueie acessos ou promova irmãos a Administradores.</li>
+                    <li><strong>Relatórios:</strong> Veja quais territórios estão parados há mais tempo, filtre por status e dirigentes, e exporte em PDF para preencher a S-13.</li>
+                    <li><strong>Gerenciar Usuários:</strong> Aprove novos cadastros, exclua acessos ou promova irmãos a Administradores.</li>
                 </ul>
             </div>
 
@@ -81,7 +81,7 @@ const AjudaModal = ({ isOpen, onClose, isAdmin }) => {
                     🔄 Dicas de Manutenção
                 </h4>
                 <p className="text-sm mt-1">
-                    Sempre que uma nova versão do sistema for lançada, o aplicativo avisará e atualizará automaticamente para garantir que todos vejam os mesmos dados.
+                    Sempre que uma nova versão do sistema for lançada, o aplicativo atualizará automaticamente para garantir que todos vejam os mesmos dados. Verifique mais informações no rodapé do menu.
                 </p>
             </div>
         </div>
