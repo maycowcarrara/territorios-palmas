@@ -44,25 +44,38 @@ const Relatorios = () => {
                     dataDesigStr = dataDesigObj.toLocaleDateString('pt-BR');
                 }
 
-                // Processar Histórico
+                // --- NOVA LÓGICA DE HISTÓRICO (CICLOS) ---
                 let historicoProcessado = [];
                 if (data.historico && Array.isArray(data.historico)) {
                     historicoProcessado = data.historico.map(h => {
-                        const ret = h.dataRetirada?.toDate ? h.dataRetirada.toDate() : new Date(h.dataRetirada);
-                        const dev = h.dataDevolucao?.toDate ? h.dataDevolucao.toDate() : new Date(h.dataDevolucao);
+                        // Data de Início (Tenta pegar dataInicio do ciclo, senão dataRetirada antiga)
+                        const inicio = h.dataInicio?.toDate ? h.dataInicio.toDate() : (h.dataRetirada?.toDate ? h.dataRetirada.toDate() : new Date());
 
-                        const dataRetStr = !isNaN(ret) ? ret.toLocaleDateString('pt-BR') : '?';
-                        const dataDevStr = !isNaN(dev) ? dev.toLocaleDateString('pt-BR') : '?';
+                        // Data de Término (Tenta pegar dataTermino do ciclo, senão dataDevolucao antiga)
+                        const fim = h.dataTermino?.toDate ? h.dataTermino.toDate() : (h.dataDevolucao?.toDate ? h.dataDevolucao.toDate() : new Date());
+
+                        const inicioStr = !isNaN(inicio) ? inicio.toLocaleDateString('pt-BR') : '?';
+                        const fimStr = !isNaN(fim) ? fim.toLocaleDateString('pt-BR') : '?';
+
+                        // Nomes dos Responsáveis (Pode ser Array novo ou String antiga)
+                        let listaNomes = "";
+                        if (Array.isArray(h.responsaveis)) {
+                            listaNomes = h.responsaveis.join(", ");
+                        } else {
+                            listaNomes = h.responsavel || "Desconhecido"; // Fallback
+                        }
 
                         return {
-                            responsavel: h.responsavel,
-                            retirada: dataRetStr,
-                            devolucao: dataDevStr,
-                            timestampDev: dev
+                            nomes: listaNomes,
+                            inicio: inicioStr,
+                            termino: fimStr,
+                            timestampFim: fim
                         };
                     });
-                    historicoProcessado.sort((a, b) => b.timestampDev - a.timestampDev);
-                    historicoProcessado = historicoProcessado.slice(0, 6);
+
+                    // Ordena pelo término mais recente
+                    historicoProcessado.sort((a, b) => b.timestampFim - a.timestampFim);
+                    historicoProcessado = historicoProcessado.slice(0, 10); // Limita aos últimos 10
                 }
 
                 const nomeSeguro = data.nome || `Território ${doc.id}`;
@@ -224,32 +237,39 @@ const Relatorios = () => {
         const textoFiltro = busca ? `Busca: "${busca}"` : "Sem busca";
         doc.text(`Filtros: Status (${statusFiltro}) | Tempo (${textoTempoFiltro}) | ${textoFiltro}`, 14, 31);
 
-        const tableColumn = ["Cód.", "Nome", "Status", "Responsável / Histórico", "Conclusão", "Tempo Parado"];
+        const tableColumn = ["Cód.", "Nome", "Status", "Histórico / Ciclos", "Ult. Conclusão", "Tempo Parado"];
         const tableRows = [];
 
         dadosProcessados.forEach(t => {
-            let textoResponsavel = "";
+            let textoHistorico = "";
 
             if (t.status === 'ocupado') {
-                textoResponsavel += `ATUAL: ${t.designadoNome || '-'}\n(Desde: ${t.dataDesigStr})\n`;
+                // Se tiver ciclo atual acumulado (array), junta os nomes. Senão usa o nome único.
+                let atuais = t.designadoNome;
+                if (t.cicloAtual && Array.isArray(t.cicloAtual.responsaveis)) {
+                    atuais = t.cicloAtual.responsaveis.join(", ");
+                }
+                textoHistorico += `[EM ANDAMENTO]\nDirigentes: ${atuais}\nDesde: ${t.dataDesigStr}\n\n`;
             } else {
-                textoResponsavel += "LIVRE\n";
+                textoHistorico += "LIVRE\n";
             }
 
             if (t.historicoLista && t.historicoLista.length > 0) {
-                textoResponsavel += "\n-- HISTÓRICO --\n";
+                textoHistorico += "-- HISTÓRICO --\n";
                 t.historicoLista.forEach(h => {
-                    textoResponsavel += `${h.responsavel} (${h.retirada} - ${h.devolucao})\n`;
+                    // FORMATO SOLICITADO:
+                    // Início: DATA - Dirigentes: Nomes - Término: DATA
+                    textoHistorico += `• Início: ${h.inicio} - Dirigentes: ${h.nomes} - Término: ${h.termino}\n`;
                 });
             } else {
-                textoResponsavel += "\n(Sem histórico)";
+                textoHistorico += "\n(Sem histórico)";
             }
 
             const dadosLinha = [
                 t.numeroId,
                 t.nome,
                 t.status === 'ocupado' ? 'Ocupado' : 'Livre',
-                textoResponsavel,
+                textoHistorico,
                 t.dataUltimaStr,
                 // Usando a nova formatação também no PDF
                 t.diasParado > 0 ? formatarTempo(t.diasParado) : 'Nunca'
@@ -262,10 +282,10 @@ const Relatorios = () => {
             body: tableRows,
             startY: 35,
             theme: 'grid',
-            styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
+            styles: { fontSize: 8, cellPadding: 2, valign: 'top' }, // valign top para ficar alinhado ao topo
             headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255] },
             columnStyles: {
-                3: { cellWidth: 90 }
+                3: { cellWidth: 95 } // Coluna de histórico bem larga
             }
         });
 
@@ -294,7 +314,7 @@ const Relatorios = () => {
                     </div>
                 </header>
 
-                {/* CARDS DE RESUMO - COM DESCRIÇÃO RESTAURADA */}
+                {/* CARDS DE RESUMO */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                     <div onClick={() => aplicarFiltroRapido('total')} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer transition-all hover:border-slate-300">
                         <p className="text-xs font-bold text-slate-400 uppercase">Total</p>
@@ -318,7 +338,7 @@ const Relatorios = () => {
                     </div>
                 </div>
 
-                {/* BARRA DE FILTROS - OPÇÕES DE TEMPO ADICIONADAS */}
+                {/* BARRA DE FILTROS */}
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
                     <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center">
                         <div className="relative w-full lg:w-1/3">
@@ -334,7 +354,6 @@ const Relatorios = () => {
                                 <option value="ocupado">Apenas Ocupados</option>
                             </select>
 
-                            {/* NOVO SELECT DE TEMPO */}
                             <select value={tempoFiltro} onChange={(e) => setTempoFiltro(e.target.value)} className="w-full sm:w-auto px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 cursor-pointer">
                                 <option value="todos">Tempo: Todos</option>
                                 <option value="2_meses">+2 Meses</option>
@@ -386,11 +405,15 @@ const Relatorios = () => {
                                                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 uppercase">Livre</span>
                                                 }
                                             </td>
-                                            <td className="px-4 py-3 text-slate-600">{t.designadoNome || '-'}</td>
+                                            <td className="px-4 py-3 text-slate-600">
+                                                {t.designadoNome || '-'}
+                                                {t.status === 'ocupado' && t.cicloAtual && t.cicloAtual.responsaveis && t.cicloAtual.responsaveis.length > 1 && (
+                                                    <span className="text-[10px] text-blue-500 ml-1">(+ {t.cicloAtual.responsaveis.length - 1} outros)</span>
+                                                )}
+                                            </td>
                                             <td className="px-4 py-3 text-slate-500 text-xs hidden sm:table-cell">{t.dataDesigStr}</td>
                                             <td className="px-4 py-3 text-right text-slate-500 text-xs hidden sm:table-cell">{t.dataUltimaStr}</td>
 
-                                            {/* COLUNA TEMPO PARADO FORMATADA */}
                                             <td className="px-4 py-3 text-right">
                                                 <span className={`px-2 py-1 rounded text-xs font-bold ${getCorTempo(t.diasParado)}`}>
                                                     {formatarTempo(t.diasParado)}
@@ -398,30 +421,30 @@ const Relatorios = () => {
                                             </td>
                                         </tr>
 
-                                        {/* LINHA DE HISTÓRICO */}
+                                        {/* LINHA DE HISTÓRICO EXPANDIDA */}
                                         {linhasExpandidas.includes(t.id) && (
                                             <tr className="bg-slate-50 animate-fade-in">
                                                 <td colSpan="8" className="p-0">
                                                     <div className="p-4 border-b border-slate-200 shadow-inner">
                                                         <div className="bg-white rounded-lg border border-slate-200 p-3">
                                                             <h4 className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
-                                                                📜 Histórico Recente (Últimas 6 vezes)
+                                                                📜 Histórico de Ciclos
                                                             </h4>
                                                             {t.historicoLista.length > 0 ? (
                                                                 <table className="w-full text-xs text-left">
                                                                     <thead>
                                                                         <tr className="text-slate-400 border-b border-slate-100">
-                                                                            <th className="py-2 pl-2">Responsável</th>
-                                                                            <th className="py-2">Retirada</th>
-                                                                            <th className="py-2">Devolução</th>
+                                                                            <th className="py-2 pl-2">Início</th>
+                                                                            <th className="py-2">Dirigentes (Ciclo Completo)</th>
+                                                                            <th className="py-2">Término</th>
                                                                         </tr>
                                                                     </thead>
                                                                     <tbody>
                                                                         {t.historicoLista.map((hist, index) => (
                                                                             <tr key={index} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
-                                                                                <td className="py-2 pl-2 font-medium text-slate-700">{hist.responsavel}</td>
-                                                                                <td className="py-2 text-slate-500">{hist.retirada}</td>
-                                                                                <td className="py-2 text-green-600 font-medium">{hist.devolucao}</td>
+                                                                                <td className="py-2 pl-2 text-slate-500">{hist.inicio}</td>
+                                                                                <td className="py-2 font-medium text-slate-700">{hist.nomes}</td>
+                                                                                <td className="py-2 text-green-600 font-medium">{hist.termino}</td>
                                                                             </tr>
                                                                         ))}
                                                                     </tbody>
