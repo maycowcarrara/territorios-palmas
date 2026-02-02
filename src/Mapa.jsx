@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker } from 'react-leaflet';
-import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, getDoc, query, where } from 'firebase/firestore';
 import { db } from './firebase';
 import L from 'leaflet';
+
+// ⚠️ CONFIGURAÇÃO DO ONESIGNAL (PREENCHA AQUI) ⚠️
+const ONESIGNAL_APP_ID = "468b1307-84c9-48d1-b77d-e3206c010adf";
 
 // --- CSS ---
 const cssTooltip = `
@@ -219,7 +222,7 @@ const ModalNota = ({ isOpen, onClose, onSave, onDelete, dados }) => {
                     <h3 className="text-white font-bold text-lg flex items-center gap-2">
                         📝 Nota da Quadra {dados?.quadraId}
                     </h3>
-                    <button onClick={onClose} className="text-white/80 hover:text-white text-xl font-bold">&times;</button>
+                    <button onClick={onClose} className="text-white/80 hover:text-white text-xl font-bold">×</button>
                 </div>
                 <div className="p-6">
                     <p className="text-sm text-gray-500 mb-2">Edite ou visualize a observação desta quadra:</p>
@@ -245,14 +248,28 @@ const ModalNota = ({ isOpen, onClose, onSave, onDelete, dados }) => {
     );
 };
 
-// --- QUADRA MARKER ATUALIZADO ---
-const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrirNota }) => {
+// --- QUADRA MARKER (ATUALIZADO COM DETECÇÃO DE CONCLUSÃO) ---
+const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrirNota, totalQuadras, qtdFeitas, onConclusao }) => {
     const alternarQuadra = async () => {
         if (!podeEditar) return;
+
         const idSeguro = `t_${idTerritorio}`;
         const docRef = doc(db, "territorios", idSeguro);
-        if (isFeita) await updateDoc(docRef, { quadras_feitas: arrayRemove(quadra.id) });
-        else await updateDoc(docRef, { quadras_feitas: arrayUnion(quadra.id) });
+
+        if (isFeita) {
+            // Desmarcar
+            await updateDoc(docRef, { quadras_feitas: arrayRemove(quadra.id) });
+        } else {
+            // Marcar como feita
+            await updateDoc(docRef, { quadras_feitas: arrayUnion(quadra.id) });
+
+            // LÓGICA DE CONCLUSÃO:
+            // Se eu estou marcando agora, e a quantidade de feitas + 1 for igual ao total
+            // Significa que acabei de concluir o território!
+            if (qtdFeitas + 1 === totalQuadras) {
+                if (onConclusao) onConclusao();
+            }
+        }
     };
 
     const handleContextMenu = (e) => {
@@ -320,6 +337,68 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         return () => unsub();
     }, [idTerritorio, nome]);
 
+    // --- NOVA FUNÇÃO: NOTIFICAR ADMINS SOBRE CONCLUSÃO ---
+    const notificarConclusao = async () => {
+        // Só notifica se tiver um dirigente designado (para não notificar limpezas manuais de admin)
+        if (!dadosBanco.designadoPara) return;
+
+        console.log("Território concluído! Notificando admins...");
+
+        try {
+            // 1. Busca quem são os ADMINS no banco
+            const q = query(collection(db, "usuarios"), where("role", "==", "admin"));
+            const querySnapshot = await getDocs(q);
+            const emailsAdmins = [];
+            querySnapshot.forEach((doc) => {
+                emailsAdmins.push(doc.id); // O ID é o email
+            });
+
+            if (emailsAdmins.length === 0) return;
+
+            // 2. Envia Notificação Interna (Sininho) para o grupo ADMINS
+            await addDoc(collection(db, "notificacoes"), {
+                para: "ADMINS",
+                texto: `🏁 O Território ${nome} foi 100% concluído por ${dadosBanco.designadoNome}.`,
+                data: new Date(),
+                lida: false,
+                tipo: 'devolucao', // Usa ícone de bandeira/conclusão
+                origem: 'sistema'
+            });
+
+            // Busca chave no banco
+            const docRefConfig = doc(db, "config", "chaves");
+            const docSnapConfig = await getDoc(docRefConfig);
+            if (!docSnapConfig.exists()) return;
+            const apiKey = docSnapConfig.data().onesignal_key;
+
+            // 3. Envia PUSH para os Admins (OneSignal)
+            const options = {
+                method: 'POST',
+                headers: {
+                    accept: 'application/json',
+                    'content-type': 'application/json',
+                    Authorization: `Basic ${apiKey}` // <--- Chave do banco
+                },
+                body: JSON.stringify({
+                    app_id: ONESIGNAL_APP_ID,
+                    include_external_user_ids: emailsAdmins, // Lista de emails dos admins
+                    contents: { en: `🏁 Território ${nome} CONCLUÍDO!` },
+                    headings: { en: "Atenção: Território Finalizado" },
+                    subtitle: { en: `Por: ${dadosBanco.designadoNome}` },
+                    url: "https://maycowcarrara.github.io/territorios-palmas/"
+                })
+            };
+
+            // Dispara sem esperar (fire and forget)
+            fetch('https://onesignal.com/api/v1/notifications', options).catch(err => console.error("Erro OneSignal Conclusao", err));
+
+            alert("Parabéns! Você concluiu todas as quadras. Os administradores foram notificados.");
+
+        } catch (error) {
+            console.error("Erro ao notificar conclusão:", error);
+        }
+    };
+
     // --- FUNÇÕES DO MODAL ---
     const abrirModalNota = (quadraId, notaAtual) => {
         setModalConfig({
@@ -358,8 +437,11 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const isMeu = donoDoTerritorio === usuarioAtual;
     const isOcupado = donoDoTerritorio && !isMeu;
     const isCompleto = listaQuadras.length > 0 && dadosBanco.quadras_feitas?.length === listaQuadras.length;
+
+    // VARIÁVEIS PARA A LÓGICA DE CONCLUSÃO
     const feitas = dadosBanco.quadras_feitas?.length || 0;
     const total = listaQuadras.length;
+
     const porcentagem = total > 0 ? (feitas / total) * 100 : 0;
     const deveMostrarQuadras = zoomLevel >= 16 && (isAdmin || isMeu);
     const podeVerDetalhes = isAdmin || isMeu;
@@ -501,6 +583,59 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             dataDesignacao: new Date(),
             cicloAtual: novoCiclo
         });
+
+        // -------------------------------------------------------------
+        // AQUI ESTÁ A LÓGICA DO ONESIGNAL (PUSH NA DESIGNAÇÃO)
+        // -------------------------------------------------------------
+        // -------------------------------------------------------------
+        // AQUI ESTÁ A LÓGICA DO ONESIGNAL (SEGURA)
+        // -------------------------------------------------------------
+        const enviarPushOneSignal = async () => {
+            try {
+                // 1. Busca a chave no banco de dados (para não ficar exposta no GitHub)
+                const docRefConfig = doc(db, "config", "chaves");
+                const docSnapConfig = await getDoc(docRefConfig);
+
+                let apiKey = "";
+                if (docSnapConfig.exists()) {
+                    apiKey = docSnapConfig.data().onesignal_key;
+                } else {
+                    console.error("Chave de API não encontrada no banco.");
+                    return;
+                }
+
+                // 2. Configura o envio
+                const ONESIGNAL_APP_ID = "468b1307-84c9-48d1-b77d-e3206c010adf"; // O App ID não é secreto, pode ficar aqui
+
+                const options = {
+                    method: 'POST',
+                    headers: {
+                        accept: 'application/json',
+                        'content-type': 'application/json',
+                        Authorization: `Basic ${apiKey}` // Usa a chave que veio do banco
+                    },
+                    body: JSON.stringify({
+                        app_id: ONESIGNAL_APP_ID,
+                        include_external_user_ids: [usuarioSelecionado],
+                        contents: { en: `O território ${nome} foi designado para você.` },
+                        headings: { en: "🌍 Nova Designação!" },
+                        url: "https://maycowcarrara.github.io/territorios-palmas/"
+                    })
+                };
+
+                await fetch('https://onesignal.com/api/v1/notifications', options);
+                console.log("Push enviado via OneSignal!");
+
+            } catch (err) {
+                console.error("Erro ao enviar Push:", err);
+            }
+        };
+
+        // Se selecionou alguém, dispara o Push (assíncrono, não trava o app)
+        if (usuarioSelecionado) {
+            enviarPushOneSignal();
+        }
+        // -------------------------------------------------------------
 
         try {
             await addDoc(collection(db, "notificacoes"), {
@@ -685,8 +820,11 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     isFeita={dadosBanco.quadras_feitas?.includes(quadra.id)}
                     podeEditar={isAdmin || isMeu}
                     nota={dadosBanco.notas_quadras ? dadosBanco.notas_quadras[quadra.id] : ''}
-                    // Passa a função para abrir o modal
                     onAbrirNota={abrirModalNota}
+                    // --- PROPS PARA CONTROLE DE CONCLUSÃO ---
+                    totalQuadras={total}
+                    qtdFeitas={feitas}
+                    onConclusao={notificarConclusao}
                 />
             ))}
 

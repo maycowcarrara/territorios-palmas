@@ -10,6 +10,7 @@ import Relatorios from './Relatorios';
 import appInfo from './version.json';
 import AutoUpdate from './AutoUpdate';
 import AjudaModal from './AjudaModal';
+import OneSignal from 'react-onesignal'; // Importação do OneSignal
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 let deferredPromptGlobal = null;
@@ -230,7 +231,7 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate }) => {
             return fId === numeroId;
           });
 
-          // --- RECUPERADO: Lógica de Zoom Automático (Bounds) ---
+          // Lógica de Zoom Automático (Bounds)
           let boundsStr = null;
           if (feature) {
             const coords = feature.geometry.coordinates[0];
@@ -265,7 +266,6 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate }) => {
   };
 
   const irParaMapa = (item) => {
-    // Usa os bounds calculados para dar o zoom perfeito
     if (item.boundsStr) {
       navigate(`/app?bounds=${item.boundsStr}`);
       onClose();
@@ -348,10 +348,12 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
   );
 };
 
-// --- MENU LATERAL (ATUALIZADO: Com Legenda) ---
+// --- MENU LATERAL (ATUALIZADO COM BOTÃO ON/OFF) ---
 const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda }) => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [notificacoesAtivas, setNotificacoesAtivas] = useState(false); // Estado do botão
 
+  // 1. Verifica o status da instalação (PWA)
   useEffect(() => {
     if (deferredPromptGlobal) {
       setDeferredPrompt(deferredPromptGlobal);
@@ -366,6 +368,38 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, []);
+
+  // 2. Verifica o status do OneSignal ao abrir o menu
+  useEffect(() => {
+    if (isOpen) {
+      try {
+        // Verifica se o usuário já aceitou as notificações no OneSignal
+        // Nota: A propriedade pode variar dependendo da versão, mas esta é a padrão v16+
+        const isOptedIn = OneSignal.User.PushSubscription.optedIn;
+        setNotificacoesAtivas(!!isOptedIn);
+      } catch (error) {
+        console.log("OneSignal ainda não carregou ou erro:", error);
+      }
+    }
+  }, [isOpen]);
+
+  // 3. Função para Ligar/Desligar
+  const toggleNotificacoes = async () => {
+    try {
+      if (notificacoesAtivas) {
+        // Se está ligado, desliga (Opt-Out)
+        await OneSignal.User.PushSubscription.optOut();
+        setNotificacoesAtivas(false);
+      } else {
+        // Se está desligado, liga (Opt-In)
+        await OneSignal.User.PushSubscription.optIn();
+        setNotificacoesAtivas(true);
+      }
+    } catch (error) {
+      console.error("Erro ao alterar notificação:", error);
+      alert("Para ativar, você precisa permitir as notificações nas configurações do seu navegador (cadeado na barra de endereço).");
+    }
+  };
 
   const instalarApp = async () => {
     if (deferredPrompt) {
@@ -386,6 +420,8 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
     <>
       {isOpen && <div className="fixed inset-0 z-[2000] bg-black/50 transition-opacity" onClick={onClose}></div>}
       <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[2001] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
+
+        {/* CABEÇALHO DO MENU */}
         <div className="bg-blue-600 p-6 text-white flex-shrink-0">
           <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -405,8 +441,11 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
             {isAdmin ? 'Administrador' : 'Dirigente'}
           </span>
         </div>
+
+        {/* CORPO DO MENU */}
         <div className="p-4 flex flex-col gap-2 flex-1 overflow-y-auto">
-          {/* Botão MAPA */}
+
+          {/* BOTÃO MAPA */}
           <button onClick={() => { navigate('/app'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 text-blue-700 font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
@@ -414,7 +453,24 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
             Mapa
           </button>
 
-          {/* NOVO: Botão LEGENDA MOVIDO PARA CÁ */}
+          {/* BOTÃO SWITCH DE NOTIFICAÇÕES (NOVO) */}
+          <div className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-100">
+            <div className="flex items-center gap-3 text-gray-700 font-medium">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
+              </svg>
+              <span className="text-sm">Notificações</span>
+            </div>
+
+            {/* O Switch Visual (Toggle) */}
+            <button
+              onClick={toggleNotificacoes}
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${notificacoesAtivas ? 'bg-green-500' : 'bg-gray-300'}`}
+            >
+              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${notificacoesAtivas ? 'translate-x-5' : 'translate-x-0'}`}></div>
+            </button>
+          </div>
+
           <button onClick={() => { abrirLegenda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -437,7 +493,6 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
                 </svg>
                 Gerenciar Usuários
               </button>
-              {/* NOVO: RELATÓRIOS MOVIDO PARA CÁ */}
               <button onClick={() => { navigate('/relatorios'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
@@ -447,6 +502,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
               </button>
             </>
           )}
+
           {!isStandalone && (
             <button onClick={instalarApp} className="flex items-center gap-3 p-3 rounded-lg hover:bg-green-50 text-green-700 transition-colors font-medium border border-dashed border-green-200 mt-2">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -455,7 +511,9 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
               Instalar Aplicativo
             </button>
           )}
+
           <div className="h-px bg-gray-100 my-2"></div>
+
           <button onClick={handleLogout} className="flex items-center gap-3 p-3 rounded-lg hover:bg-red-50 text-red-600 transition-colors font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd" />
@@ -463,6 +521,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
             Sair do Sistema
           </button>
         </div>
+
         <div className="p-4 text-center text-[10px] text-gray-300 bg-gray-50 border-t border-gray-100 flex-shrink-0">
           <p>Territórios Digitais v{appInfo.version}</p>
           <p className="opacity-70">Atualizado em: {appInfo.buildDate}</p>
@@ -473,7 +532,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
   );
 };
 
-// --- DASHBOARD (Tela Principal) ---
+// --- DASHBOARD ---
 function Dashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
@@ -537,7 +596,7 @@ function Dashboard() {
         navigate={navigate}
         handleLogout={handleLogout}
         abrirAjuda={() => setAjudaAberta(true)}
-        abrirLegenda={() => setLegendaAberta(true)} // Passando a função para o menu
+        abrirLegenda={() => setLegendaAberta(true)}
       />
 
       <LegendaModal
@@ -559,16 +618,13 @@ function Dashboard() {
         navigate={navigate}
       />
 
-      {/* BARRA SUPERIOR (LIMPA) */}
       <div className="h-16 bg-blue-600 text-white shadow-md z-20 px-4 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
           <span className="text-xl font-bold tracking-wide">Territórios</span>
         </div>
 
         <div className="flex items-center gap-3">
-
           <SininhoNotificacoes user={user} isAdmin={isAdmin} />
-
           <button
             onClick={() => setMeusTerritoriosAberto(true)}
             className="flex items-center gap-1 px-3 py-1.5 bg-blue-700/80 hover:bg-blue-800 rounded-full shadow-sm text-sm font-semibold transition-colors active:scale-95 border border-blue-500"
@@ -576,11 +632,8 @@ function Dashboard() {
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
             </svg>
-            {/* Opcional: esconder o texto em telas muito pequenas */}
             <span className="text-xs uppercase tracking-wider">Meus</span>
           </button>
-
-          {/* Botão de MENU (Hamburger) - O resto foi para dentro dele */}
           <button
             onClick={() => setMenuAberto(true)}
             className="p-1 hover:bg-blue-700 rounded transition-colors ml-1"
@@ -599,7 +652,40 @@ function Dashboard() {
   );
 }
 
+// --- APP PRINCIPAL (CORRIGIDO) ---
 function App() {
+  const [user, setUser] = useState(null);
+
+  // 1. Monitora o Auth Globalmente para ativar o OneSignal
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsub();
+  }, []);
+
+  // 2. Inicializa o OneSignal
+  useEffect(() => {
+    const initOneSignal = async () => {
+      try {
+        await OneSignal.init({
+          appId: "468b1307-84c9-48d1-b77d-e3206c010adf", // Seu App ID
+          allowLocalhostAsSecureOrigin: true,
+          notifyButton: { enable: true },
+        });
+
+        // Se logado, autentica no OneSignal
+        if (user && user.email) {
+          OneSignal.login(user.email);
+        }
+      } catch (error) {
+        console.error("Erro OneSignal:", error);
+      }
+    };
+
+    initOneSignal();
+  }, [user]); // Recarrega se o usuário mudar (logar/deslogar)
+
   return (
     <HashRouter>
       <AutoUpdate />
