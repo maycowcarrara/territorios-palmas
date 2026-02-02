@@ -61,7 +61,7 @@ const DeepLinkHandler = () => {
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
-        
+
         // 1. Tenta ler BOUNDS (Novo Método - Ajuste Perfeito)
         const boundsParam = params.get('bounds');
         if (boundsParam) {
@@ -73,8 +73,8 @@ const DeepLinkHandler = () => {
                     [minLat, minLng], // Sudoeste
                     [maxLat, maxLng]  // Nordeste
                 );
-                
-                setTimeout(() => { 
+
+                setTimeout(() => {
                     // fitBounds faz a mágica: encaixa o quadrado na tela do usuário
                     // padding: [50, 50] dá uma margem para não ficar colado na borda
                     map.fitBounds(bounds, { padding: [50, 50], animate: true, duration: 1.5 });
@@ -84,12 +84,12 @@ const DeepLinkHandler = () => {
         }
 
         // 2. Fallback para Lat/Lng/Zoom (Método Antigo - WhatsApp)
-        const lat = params.get('lat'); 
-        const lng = params.get('lng'); 
+        const lat = params.get('lat');
+        const lng = params.get('lng');
         const z = params.get('z');
         if (lat && lng) {
-            setTimeout(() => { 
-                map.flyTo([parseFloat(lat), parseFloat(lng)], parseFloat(z) || 17, { animate: true, duration: 1.5 }); 
+            setTimeout(() => {
+                map.flyTo([parseFloat(lat), parseFloat(lng)], parseFloat(z) || 17, { animate: true, duration: 1.5 });
             }, 500);
         }
     }, [location, map]);
@@ -121,10 +121,10 @@ const SeletorCamadas = ({ tipoMapa, setTipoMapa }) => {
 
     return (
         <div className="absolute bottom-6 left-4 z-[400] flex flex-col gap-3">
-            <button 
-                onClick={alternarCamada} 
-                className={`map-layer-btn ${classeBotao}`} 
-                title={tituloBotao} 
+            <button
+                onClick={alternarCamada}
+                className={`map-layer-btn ${classeBotao}`}
+                title={tituloBotao}
             />
         </div>
     );
@@ -134,8 +134,8 @@ const SeletorCamadas = ({ tipoMapa, setTipoMapa }) => {
 const ControleVisibilidade = ({ ocultarCores, setOcultarCores }) => {
     return (
         <div className="absolute top-4 right-4 z-[400] flex flex-col gap-2">
-            <button 
-                onClick={() => setOcultarCores(!ocultarCores)} 
+            <button
+                onClick={() => setOcultarCores(!ocultarCores)}
                 className={`w-12 h-12 flex items-center justify-center rounded-full shadow-xl border transition-all duration-200 active:scale-95 ${ocultarCores ? 'bg-blue-600 text-white border-blue-700' : 'bg-white text-slate-500 border-slate-300'}`}
                 title={ocultarCores ? "Mostrar Cores" : "Ocultar Cores (Ver Mapa)"}
             >
@@ -208,7 +208,10 @@ const MarcadorUsuario = ({ posicao }) => {
     );
 };
 
-const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar }) => {
+// --- ATUALIZAÇÃO INSERIR NOTAS EM QUADRAS ---
+// No arquivo src/Mapa.jsx, substitua o componente QuadraMarker atual por este:
+
+const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota }) => {
     const alternarQuadra = async () => {
         if (!podeEditar) return;
         const idSeguro = `t_${idTerritorio}`;
@@ -216,9 +219,68 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar }) => {
         if (isFeita) await updateDoc(docRef, { quadras_feitas: arrayRemove(quadra.id) });
         else await updateDoc(docRef, { quadras_feitas: arrayUnion(quadra.id) });
     };
+
+    const editarNota = async (e) => {
+        // Previne o menu nativo do navegador (botão direito)
+        if (e.originalEvent) e.originalEvent.preventDefault();
+
+        if (!podeEditar) return;
+
+        // Usa prompt simples do navegador para capturar o texto
+        const novaNota = prompt(`Nota para Quadra ${quadra.id}:`, nota || "");
+
+        // Se cancelou (null), não faz nada. Se vazio (""), salva vazio para apagar.
+        if (novaNota === null) return;
+
+        const idSeguro = `t_${idTerritorio}`;
+        const docRef = doc(db, "territorios", idSeguro);
+
+        // setDoc com merge: true garante que cria o campo 'notas_quadras' se não existir
+        // e atualiza apenas a chave específica dessa quadra.
+        await setDoc(docRef, {
+            notas_quadras: {
+                [quadra.id]: novaNota
+            }
+        }, { merge: true });
+    };
+
     return (
-        <CircleMarker center={[quadra.lat, quadra.lng]} pathOptions={{ color: isFeita ? '#166534' : '#b91c1c', fillColor: isFeita ? '#22c55e' : '#ef4444', fillOpacity: 1, weight: 2 }} radius={16} eventHandlers={{ click: alternarQuadra }}>
-            <Tooltip direction="center" permanent className="sem-fundo"><span className="font-bold text-white text-[16px]">{quadra.id}</span></Tooltip>
+        <CircleMarker
+            center={[quadra.lat, quadra.lng]}
+            pathOptions={{
+                color: isFeita ? '#166534' : '#b91c1c',
+                fillColor: isFeita ? '#22c55e' : '#ef4444',
+                fillOpacity: 1,
+                weight: 2
+            }}
+            radius={16}
+            eventHandlers={{
+                click: alternarQuadra,
+                contextmenu: editarNota // Captura botão direito (PC) ou Long Press (Mobile)
+            }}
+        >
+            {/* Tooltip permanente com o número */}
+            <Tooltip direction="center" permanent className="sem-fundo">
+                {/* Usamos um container relativo para posicionar o pontinho em relação a ele */}
+                <div className="relative flex items-center justify-center">
+                    <span className="font-bold text-white text-[16px] z-10">
+                        {quadra.id}
+                    </span>
+
+                    {/* O PONTINHO AMARELO EXTERNO (só aparece se tiver nota) */}
+                    {nota && (
+                        <span className="absolute -top-3 -right-3 w-3 h-3 bg-yellow-400 border border-white rounded-full shadow-sm z-20" title="Tem observação"></span>
+                    )}
+                </div>
+            </Tooltip>
+
+            {/* Tooltip extra que aparece ao passar o mouse, mostrando o texto da nota */}
+            {nota && (
+                <Tooltip direction="top" offset={[0, -20]} opacity={0.9}>
+                    <span className="font-bold text-xs uppercase text-yellow-600 block">Nota:</span>
+                    {nota}
+                </Tooltip>
+            )}
         </CircleMarker>
     );
 };
@@ -269,32 +331,32 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     }
 
     // Variáveis de Estilo
-    let corPreenchimento = '#fed7aa'; 
-    let corBorda = '#c2410c'; 
-    let pesoBorda = 1; 
-    let opacidade = 0.5; 
+    let corPreenchimento = '#fed7aa';
+    let corBorda = '#c2410c';
+    let pesoBorda = 1;
+    let opacidade = 0.5;
     let opacidadeBorda = 1;
 
     // --- CÁLCULO DE CORES (AGORA EXPANDIDO PARA CLAREZA) ---
-    if (isCompleto) { 
-        corPreenchimento = '#22c55e'; 
-        corBorda = '#15803d'; 
-        opacidade = 0.6; 
-        if (isMeu) pesoBorda = 3; 
+    if (isCompleto) {
+        corPreenchimento = '#22c55e';
+        corBorda = '#15803d';
+        opacidade = 0.6;
+        if (isMeu) pesoBorda = 3;
     }
-    else if (isMeu) { 
-        corPreenchimento = '#3b82f6'; 
-        corBorda = '#1e40af'; 
-        pesoBorda = 3; 
-        if (isAdmin) { 
-            corPreenchimento = '#a855f7'; 
-            corBorda = '#6b21a8'; 
-        } 
+    else if (isMeu) {
+        corPreenchimento = '#3b82f6';
+        corBorda = '#1e40af';
+        pesoBorda = 3;
+        if (isAdmin) {
+            corPreenchimento = '#a855f7';
+            corBorda = '#6b21a8';
+        }
     }
-    else if (isOcupado) { 
-        corPreenchimento = '#9ca3af'; 
-        corBorda = '#4b5563'; 
-        opacidade = 0.4; 
+    else if (isOcupado) {
+        corPreenchimento = '#9ca3af';
+        corBorda = '#4b5563';
+        opacidade = 0.4;
     }
     else {
         if (diasSemTrabalhar > 180) {
@@ -310,15 +372,15 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     // --- APENAS MUDAMOS A OPACIDADE SE NÃO FOR MEU (VISUAL FOCUS) ---
     if (!isAdmin && !isMeu) {
-        opacidade = 0.2;       
-        opacidadeBorda = 0.4;  
+        opacidade = 0.2;
+        opacidadeBorda = 0.4;
     }
 
     // --- SOBREPOSIÇÃO DE VISIBILIDADE (MODO FANTASMA) ---
     // AQUI É A MUDANÇA: BORDA MAIS GROSSA E FORTE
     if (ocultarCores) {
-        corPreenchimento = 'transparent'; 
-        opacidade = 0; 
+        corPreenchimento = 'transparent';
+        opacidade = 0;
         pesoBorda = 5; // Aumentado para destacar bem
         opacidadeBorda = 0.8; // Quase sólida
     }
@@ -335,7 +397,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
         // --- CENÁRIO 1: DEVOLUÇÃO (ENCERRAR O CICLO) ---
         if (!usuarioSelecionado) {
-            if (!dadosBanco.designadoPara) return; 
+            if (!dadosBanco.designadoPara) return;
 
             if (!confirm("Confirmar devolução do território?")) return;
 
@@ -376,7 +438,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     lida: false,
                     tipo: 'devolucao'
                 });
-            } catch (e) {}
+            } catch (e) { }
 
             setMsgPronta(null);
             return;
@@ -387,7 +449,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
 
         let novoCiclo = {};
-        
+
         if (!dadosBanco.designadoPara) {
             // INÍCIO
             novoCiclo = {
@@ -419,7 +481,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 lida: false,
                 tipo: 'designacao'
             });
-        } catch (e) {}
+        } catch (e) { }
 
         const msg = gerarLinkMsg(novoNome, usuarioObj?.whatsapp);
         setMsgPronta(msg);
@@ -472,7 +534,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                             <strong className="text-lg font-bold text-gray-800 block">{nome}</strong>
                             {dadosBanco.ultimaConclusao && <span className="text-[10px] text-gray-500 uppercase">Última vez: {textoTempo} atrás</span>}
                         </div>
-                        
+
                         <div className="mb-3">
                             <div className="flex justify-between text-xs text-gray-600 mb-1 font-medium"><span>{feitas} de {total} quadras</span><span>{Math.round(porcentagem)}%</span></div>
                             <div className="w-full bg-gray-200 rounded-full h-2 border border-gray-300 overflow-hidden"><div className={`h-full transition-all duration-500 ${isCompleto ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${porcentagem}%` }}></div></div>
@@ -557,8 +619,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                     </>
                                 ) : (
                                     <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded border border-gray-200">
-                                        {isOcupado ? 
-                                            <>Ocupado por: <strong className="text-gray-700">{dadosBanco.designadoNome}</strong></> : 
+                                        {isOcupado ?
+                                            <>Ocupado por: <strong className="text-gray-700">{dadosBanco.designadoNome}</strong></> :
                                             "Disponível para trabalho."
                                         }
                                     </div>
@@ -591,7 +653,15 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 )}
             </Polygon>
             {deveMostrarQuadras && listaQuadras.map(quadra => (
-                <QuadraMarker key={quadra.id} quadra={quadra} idTerritorio={idTerritorio} isFeita={dadosBanco.quadras_feitas?.includes(quadra.id)} podeEditar={isAdmin || isMeu} />
+                <QuadraMarker
+                    key={quadra.id}
+                    quadra={quadra}
+                    idTerritorio={idTerritorio}
+                    isFeita={dadosBanco.quadras_feitas?.includes(quadra.id)}
+                    podeEditar={isAdmin || isMeu}
+                    // --- LINHA NOVA ABAIXO ---
+                    nota={dadosBanco.notas_quadras ? dadosBanco.notas_quadras[quadra.id] : ''}
+                />
             ))}
         </>
     );
@@ -636,21 +706,21 @@ const Mapa = ({ user, isAdmin }) => {
             {!geoJsonData ? (
                 <div className="flex h-full items-center justify-center bg-gray-100"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>
             ) : (
-                <MapContainer 
-                    center={[-26.485, -51.995]} 
-                    zoom={14} 
-                    maxZoom={22} 
-                    zoomControl={false} 
+                <MapContainer
+                    center={[-26.485, -51.995]}
+                    zoom={14}
+                    maxZoom={22}
+                    zoomControl={false}
                     className="h-full w-full z-0"
                 >
                     <MapEvents />
                     <DeepLinkHandler />
-                    
+
                     {/* CAMADA PADRÃO (OpenStreetMap) */}
                     {tipoMapa === 'padrao' && (
-                        <TileLayer 
-                            attribution='© OpenStreetMap' 
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
+                        <TileLayer
+                            attribution='© OpenStreetMap'
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                             maxNativeZoom={19}
                             maxZoom={22}
                         />
@@ -658,8 +728,8 @@ const Mapa = ({ user, isAdmin }) => {
 
                     {/* CAMADA GOOGLE STANDARD (NOVA) */}
                     {tipoMapa === 'google' && (
-                        <TileLayer 
-                            attribution='© Google Maps' 
+                        <TileLayer
+                            attribution='© Google Maps'
                             url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
                             maxNativeZoom={20}
                             maxZoom={22}
@@ -668,8 +738,8 @@ const Mapa = ({ user, isAdmin }) => {
 
                     {/* CAMADA SATÉLITE HÍBRIDO (Google Hybrid) */}
                     {tipoMapa === 'satelite' && (
-                        <TileLayer 
-                            attribution='© Google Maps' 
+                        <TileLayer
+                            attribution='© Google Maps'
                             url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
                             maxNativeZoom={20}
                             maxZoom={22}
@@ -677,23 +747,23 @@ const Mapa = ({ user, isAdmin }) => {
                     )}
 
                     <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} />
-                    
+
                     {/* ADICIONEI O CONTROLE DE VISIBILIDADE AQUI */}
                     <ControleVisibilidade ocultarCores={ocultarCores} setOcultarCores={setOcultarCores} />
-                    
+
                     <ControlesNavegacao setPosicaoUsuario={setPosicaoUsuario} />
                     <MarcadorUsuario posicao={posicaoUsuario} />
-                    
+
                     {geoJsonData.features.map((feature, index) => {
                         const uniqueId = feature.properties.id || index + 1;
                         return (
-                            <TerritorioDetalhado 
-                                key={uniqueId} 
-                                dados={feature} 
-                                idTerritorio={uniqueId} 
-                                zoomLevel={zoomLevel} 
-                                user={user} 
-                                isAdmin={isAdmin} 
+                            <TerritorioDetalhado
+                                key={uniqueId}
+                                dados={feature}
+                                idTerritorio={uniqueId}
+                                zoomLevel={zoomLevel}
+                                user={user}
+                                isAdmin={isAdmin}
                                 listaUsuarios={listaUsuarios}
                                 ocultarCores={ocultarCores} // Passando a prop para o filho
                             />

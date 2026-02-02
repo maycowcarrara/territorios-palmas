@@ -39,15 +39,41 @@ const AdminPanel = () => {
     const handleAdicionar = async (e) => {
         e.preventDefault();
         if (!novoEmail) return;
+
+        // --- 1. VALIDAÇÃO DE E-MAIL ---
+        // Verifica se tem formato de email padrão
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(novoEmail)) {
+            alert("❌ E-mail inválido! Por favor, verifique o formato.");
+            return;
+        }
+
+        // (Opcional) Trava para aceitar apenas Gmail, já que usa Google Auth
+        if (!novoEmail.includes('@gmail.com')) {
+            alert("❌ Por favor, use um e-mail @gmail.com para compatibilidade com o login.");
+            return;
+        }
+
+        // --- 2. VALIDAÇÃO DE WHATSAPP ---
+        // Remove tudo que não for número para contar os dígitos
+        const whatsLimpo = novoWhats.replace(/\D/g, '');
+
+        // Se o campo não estiver vazio, exige entre 10 e 11 dígitos (DDD + Número)
+        if (novoWhats && (whatsLimpo.length < 10 || whatsLimpo.length > 11)) {
+            alert("❌ WhatsApp inválido! O número deve ter DDD + 8 ou 9 dígitos.");
+            return;
+        }
+
         setLoadingAdd(true);
 
         const emailFormatado = novoEmail.trim().toLowerCase();
 
         try {
             await setDoc(doc(db, "usuarios", emailFormatado), {
-                role: 'comum', // Já entra aprovado se o admin criar
+                role: 'comum',
                 nome: novoNome || 'Novo Dirigente',
-                whatsapp: novoWhats || '',
+                // Salva apenas os números no banco para facilitar links do WhatsApp API depois
+                whatsapp: whatsLimpo,
                 criadoEm: new Date()
             });
             setNovoEmail('');
@@ -116,6 +142,12 @@ const AdminPanel = () => {
     const totalUsers = usuarios.length;
     const totalAdmins = usuarios.filter(u => u.role === 'admin').length;
     const totalPendentes = usuarios.filter(u => u.role === 'aguardando').length;
+    const formatarTelefone = (valor) => {
+        return valor
+            .replace(/\D/g, '') // Remove letras
+            .replace(/^(\d{2})(\d)/g, '($1) $2') // Põe parênteses no DDD
+            .replace(/(\d)(\d{4})$/, '$1-$2'); // Põe o hífen
+    };
 
     return (
         <div className="min-h-screen bg-gray-50 p-4 font-sans">
@@ -193,10 +225,11 @@ const AdminPanel = () => {
                                 <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">WhatsApp</label>
                                 <input
                                     type="text"
-                                    placeholder="Só números"
+                                    placeholder="(46) 99999-9999" // Placeholder atualizado para guiar o usuário
                                     className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                                     value={novoWhats}
-                                    onChange={e => setNovoWhats(e.target.value)}
+                                    maxLength={15} // Limita o tamanho máximo
+                                    onChange={e => setNovoWhats(formatarTelefone(e.target.value))} // Aplica a máscara enquanto digita
                                 />
                             </div>
                             <button

@@ -1,8 +1,13 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+// 1. Adicione os novos imports aqui:
+import {
+    getFirestore,
+    initializeFirestore,
+    persistentLocalCache,
+    persistentMultipleTabManager
+} from "firebase/firestore";
 
-// --- SUAS CHAVES DO FIREBASE AQUI ---
 const firebaseConfig = {
     apiKey: "AIzaSyBmR4PilWSpPeP_TNWi7LCn9iGso3xnWI8",
     authDomain: "territorios-palmas.firebaseapp.com",
@@ -13,6 +18,14 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-export const db = getFirestore(app);
+
+// 2. Substitua a linha antiga "export const db = getFirestore(app);" por esta configuração:
+export const db = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+        // Isso permite que múltiplas abas funcionem sem travar o banco offline
+        tabManager: persistentMultipleTabManager()
+    })
+});
