@@ -14,6 +14,7 @@ body,
 /* Remove o fundo branco padrão dos números nas bolinhas */
 .leaflet-tooltip.sem-fundo {
   background: transparent !important;
+  background-color: transparent !important;
   border: none !important;
   box-shadow: none !important;
   color: white !important; /* Garante que o número seja branco */

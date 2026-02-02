@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore'; // Mudei para onSnapshot (tempo real)
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 export function useUsuario(user) {
@@ -16,34 +16,37 @@ export function useUsuario(user) {
         }
 
         setLoading(true);
-        const docRef = doc(db, "usuarios", user.email);
 
-        // Usamos onSnapshot para ouvir mudanças em tempo real
-        // (Se você aprovar o usuário no painel, ele entra na hora sem precisar recarregar)
+        // --- CORREÇÃO AQUI ---
+        // Forçamos o e-mail para minúsculo para garantir que bata com o cadastro do AdminPanel
+        const emailFormatado = user.email.toLowerCase();
+        const docRef = doc(db, "usuarios", emailFormatado);
+
         const unsub = onSnapshot(docRef, async (docSnap) => {
 
             if (docSnap.exists()) {
                 const dados = docSnap.data();
 
-                // Só entra se for 'admin' ou 'comum'. Se for 'aguardando', não entra.
+                // Só entra se for 'admin' ou 'comum'.
                 const podeEntrar = dados.role === 'admin' || dados.role === 'comum';
 
                 setAutorizado(podeEntrar);
                 setIsAdmin(dados.role === 'admin');
                 setLoading(false);
             } else {
-                // --- O PULO DO GATO ---
-                // Se não existe, cria automaticamente como 'aguardando'
+                // Se não existe, cria a solicitação AUTOMATICAMENTE
                 try {
                     await setDoc(docRef, {
                         role: 'aguardando',
                         nome: user.displayName || 'Sem nome',
+                        emailOriginal: user.email, // Guarda o e-mail original do Google só por segurança
                         criadoEm: new Date()
                     });
                 } catch (err) {
                     console.error("Erro ao criar solicitação:", err);
                 }
-                // Mantém bloqueado por enquanto
+
+                // Mantém bloqueado
                 setAutorizado(false);
                 setIsAdmin(false);
                 setLoading(false);

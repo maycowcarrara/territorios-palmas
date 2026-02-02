@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker } from 'react-leaflet';
-// IMPORT COMPLETO COM addDoc
 import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import L from 'leaflet';
@@ -44,6 +43,13 @@ const cssTooltip = `
     filter: drop-shadow(0 0 4px rgba(255,255,255,0.5)); 
   }
 
+  /* Remove o quadrado branco padrão do Tooltip do Leaflet se usar a classe sem-fundo */
+  .leaflet-tooltip.sem-fundo {
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
   .popup-btn-action { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px; border-radius: 6px; font-weight: bold; font-size: 12px; transition: background-color 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1); cursor: pointer; }
 `;
 
@@ -68,22 +74,15 @@ const DeepLinkHandler = () => {
             const parts = boundsParam.split(',').map(parseFloat);
             if (parts.length === 4) {
                 const [minLat, minLng, maxLat, maxLng] = parts;
-                // Cria os limites para o Leaflet
-                const bounds = L.latLngBounds(
-                    [minLat, minLng], // Sudoeste
-                    [maxLat, maxLng]  // Nordeste
-                );
-
+                const bounds = L.latLngBounds([minLat, minLng], [maxLat, maxLng]);
                 setTimeout(() => {
-                    // fitBounds faz a mágica: encaixa o quadrado na tela do usuário
-                    // padding: [50, 50] dá uma margem para não ficar colado na borda
                     map.fitBounds(bounds, { padding: [50, 50], animate: true, duration: 1.5 });
                 }, 500);
-                return; // Se usou bounds, não faz mais nada
+                return;
             }
         }
 
-        // 2. Fallback para Lat/Lng/Zoom (Método Antigo - WhatsApp)
+        // 2. Fallback para Lat/Lng/Zoom
         const lat = params.get('lat');
         const lng = params.get('lng');
         const z = params.get('z');
@@ -101,7 +100,7 @@ const DeepLinkHandler = () => {
 const SeletorCamadas = ({ tipoMapa, setTipoMapa }) => {
     const alternarCamada = () => {
         if (tipoMapa === 'google') setTipoMapa('satelite');
-        else if (tipoMapa === 'satelite') setTipoMapa('padrao'); // OSM
+        else if (tipoMapa === 'satelite') setTipoMapa('padrao');
         else setTipoMapa('google');
     };
 
@@ -130,7 +129,6 @@ const SeletorCamadas = ({ tipoMapa, setTipoMapa }) => {
     );
 };
 
-// --- NOVO: CONTROLE DE VISIBILIDADE (MODO FANTASMA) ---
 const ControleVisibilidade = ({ ocultarCores, setOcultarCores }) => {
     return (
         <div className="absolute top-4 right-4 z-[400] flex flex-col gap-2">
@@ -140,14 +138,11 @@ const ControleVisibilidade = ({ ocultarCores, setOcultarCores }) => {
                 title={ocultarCores ? "Mostrar Cores" : "Ocultar Cores (Ver Mapa)"}
             >
                 {ocultarCores ? (
-                    // Ícone Olho Aberto (Modo Fantasma Ativo - Clicar para ver cores)
-                    // (Na verdade, aqui você está vendo o mapa limpo, então o ícone deve sugerir "Voltar a ver cores")
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
                 ) : (
-                    // Ícone Olho Cortado (Modo Normal - Clicar para ocultar cores)
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
                     </svg>
@@ -195,10 +190,7 @@ const MarcadorUsuario = ({ posicao }) => {
             <Popup>
                 <div className="text-center p-1">
                     <p className="font-bold text-sm mb-2 text-gray-700">Você está aqui</p>
-                    <button
-                        onClick={compartilharLocalizacao}
-                        className="popup-btn-action bg-blue-600 text-white hover:bg-blue-700 text-xs py-1 px-3 shadow-md"
-                    >
+                    <button onClick={compartilharLocalizacao} className="popup-btn-action bg-blue-600 text-white hover:bg-blue-700 text-xs py-1 px-3 shadow-md">
                         <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z" /></svg>
                         Compartilhar Local
                     </button>
@@ -208,10 +200,53 @@ const MarcadorUsuario = ({ posicao }) => {
     );
 };
 
-// --- ATUALIZAÇÃO INSERIR NOTAS EM QUADRAS ---
-// No arquivo src/Mapa.jsx, substitua o componente QuadraMarker atual por este:
+// --- MODAL DE NOTAS (INTEGRADO) ---
+const ModalNota = ({ isOpen, onClose, onSave, onDelete, dados }) => {
+    const [texto, setTexto] = useState('');
 
-const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota }) => {
+    useEffect(() => {
+        if (isOpen && dados) {
+            setTexto(dados.notaAtual || '');
+        }
+    }, [isOpen, dados]);
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in" style={{ zIndex: 9999 }}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100">
+                <div className="bg-blue-600 p-4 flex justify-between items-center">
+                    <h3 className="text-white font-bold text-lg flex items-center gap-2">
+                        📝 Nota da Quadra {dados?.quadraId}
+                    </h3>
+                    <button onClick={onClose} className="text-white/80 hover:text-white text-xl font-bold">&times;</button>
+                </div>
+                <div className="p-6">
+                    <p className="text-sm text-gray-500 mb-2">Edite ou visualize a observação desta quadra:</p>
+                    <textarea
+                        className="w-full h-32 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none text-gray-700"
+                        placeholder="Ex: Cachorro bravo, morador pediu para não bater..."
+                        value={texto}
+                        onChange={(e) => setTexto(e.target.value)}
+                        autoFocus
+                    />
+                </div>
+                <div className="bg-gray-50 p-4 flex justify-between items-center border-t border-gray-100">
+                    <button onClick={() => onDelete(dados.quadraId)} className="text-red-600 hover:text-red-700 text-sm font-semibold px-3 py-2 rounded hover:bg-red-50 transition-colors">
+                        🗑️ Excluir Nota
+                    </button>
+                    <div className="flex gap-2">
+                        <button onClick={onClose} className="px-4 py-2 text-gray-600 font-medium hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
+                        <button onClick={() => onSave(dados.quadraId, texto)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 transition-colors">Salvar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- QUADRA MARKER ATUALIZADO ---
+const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrirNota }) => {
     const alternarQuadra = async () => {
         if (!podeEditar) return;
         const idSeguro = `t_${idTerritorio}`;
@@ -220,28 +255,14 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota }) => {
         else await updateDoc(docRef, { quadras_feitas: arrayUnion(quadra.id) });
     };
 
-    const editarNota = async (e) => {
-        // Previne o menu nativo do navegador (botão direito)
-        if (e.originalEvent) e.originalEvent.preventDefault();
-
-        if (!podeEditar) return;
-
-        // Usa prompt simples do navegador para capturar o texto
-        const novaNota = prompt(`Nota para Quadra ${quadra.id}:`, nota || "");
-
-        // Se cancelou (null), não faz nada. Se vazio (""), salva vazio para apagar.
-        if (novaNota === null) return;
-
-        const idSeguro = `t_${idTerritorio}`;
-        const docRef = doc(db, "territorios", idSeguro);
-
-        // setDoc com merge: true garante que cria o campo 'notas_quadras' se não existir
-        // e atualiza apenas a chave específica dessa quadra.
-        await setDoc(docRef, {
-            notas_quadras: {
-                [quadra.id]: novaNota
-            }
-        }, { merge: true });
+    const handleContextMenu = (e) => {
+        if (e.originalEvent) {
+            e.originalEvent.preventDefault();
+            e.originalEvent.stopPropagation();
+        }
+        if (podeEditar) {
+            onAbrirNota(quadra.id, nota);
+        }
     };
 
     return (
@@ -256,42 +277,30 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota }) => {
             radius={16}
             eventHandlers={{
                 click: alternarQuadra,
-                contextmenu: editarNota // Captura botão direito (PC) ou Long Press (Mobile)
+                contextmenu: handleContextMenu
             }}
         >
-            {/* Tooltip permanente com o número */}
-            <Tooltip direction="center" permanent className="sem-fundo">
-                {/* Usamos um container relativo para posicionar o pontinho em relação a ele */}
-                <div className="relative flex items-center justify-center">
-                    <span className="font-bold text-white text-[16px] z-10">
-                        {quadra.id}
-                    </span>
-
-                    {/* O PONTINHO AMARELO EXTERNO (só aparece se tiver nota) */}
-                    {nota && (
-                        <span className="absolute -top-3 -right-3 w-3 h-3 bg-yellow-400 border border-white rounded-full shadow-sm z-20" title="Tem observação"></span>
+            <Tooltip direction="center" permanent className="sem-fundo" opacity={1}>
+                <div className="relative flex items-center justify-center w-8 h-8 overflow-visible pointer-events-none">
+                    <span className="font-bold text-white text-[15px] drop-shadow-md select-none">{quadra.id}</span>
+                    {nota && nota.trim() !== "" && (
+                        <span className="absolute -top-1 -right-2 w-3 h-3 bg-yellow-400 border-2 border-white rounded-full shadow-sm z-50" title="Tem observação (Segure ou clique c/ botão direito)"></span>
                     )}
                 </div>
             </Tooltip>
-
-            {/* Tooltip extra que aparece ao passar o mouse, mostrando o texto da nota */}
-            {nota && (
-                <Tooltip direction="top" offset={[0, -20]} opacity={0.9}>
-                    <span className="font-bold text-xs uppercase text-yellow-600 block">Nota:</span>
-                    {nota}
-                </Tooltip>
-            )}
         </CircleMarker>
     );
 };
 
-// --- TERRITÓRIO DETALHADO ---
-// ATUALIZADO: Recebe ocultarCores
+// --- TERRITÓRIO DETALHADO ATUALIZADO ---
 const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, listaUsuarios, ocultarCores }) => {
     const [dadosBanco, setDadosBanco] = useState({ status: 'aberto', quadras_feitas: [], designadoPara: null, designadoNome: null, ultimaConclusao: null });
     const [usuarioSelecionado, setUsuarioSelecionado] = useState("");
     const [msgPronta, setMsgPronta] = useState(null);
     const [posicaoClique, setPosicaoClique] = useState(null);
+
+    // ESTADO DO MODAL ADICIONADO AQUI
+    const [modalConfig, setModalConfig] = useState({ open: false, dados: null });
 
     const listaQuadras = (dados.properties.pontos || []).map((p, index) => ({ id: index + 1, lat: p.lat, lng: p.lng }));
     const nome = dados.properties.nome || `T-${idTerritorio}`;
@@ -310,6 +319,39 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         });
         return () => unsub();
     }, [idTerritorio, nome]);
+
+    // --- FUNÇÕES DO MODAL ---
+    const abrirModalNota = (quadraId, notaAtual) => {
+        setModalConfig({
+            open: true,
+            dados: { quadraId, notaAtual }
+        });
+    };
+
+    const fecharModal = () => {
+        setModalConfig({ ...modalConfig, open: false });
+    };
+
+    const salvarNota = async (quadraId, novoTexto) => {
+        const podeEditar = isAdmin || isMeu;
+        if (!podeEditar) return;
+
+        const idSeguro = `t_${idTerritorio}`;
+        const docRef = doc(db, "territorios", idSeguro);
+
+        await setDoc(docRef, {
+            notas_quadras: {
+                [quadraId]: novoTexto
+            }
+        }, { merge: true });
+
+        fecharModal();
+    };
+
+    const excluirNota = async (quadraId) => {
+        if (!confirm("Deseja realmente apagar esta nota?")) return;
+        await salvarNota(quadraId, "");
+    };
 
     const usuarioAtual = user?.email;
     const donoDoTerritorio = dadosBanco.designadoPara;
@@ -337,7 +379,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     let opacidade = 0.5;
     let opacidadeBorda = 1;
 
-    // --- CÁLCULO DE CORES (AGORA EXPANDIDO PARA CLAREZA) ---
     if (isCompleto) {
         corPreenchimento = '#22c55e';
         corBorda = '#15803d';
@@ -370,19 +411,16 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         }
     }
 
-    // --- APENAS MUDAMOS A OPACIDADE SE NÃO FOR MEU (VISUAL FOCUS) ---
     if (!isAdmin && !isMeu) {
         opacidade = 0.2;
         opacidadeBorda = 0.4;
     }
 
-    // --- SOBREPOSIÇÃO DE VISIBILIDADE (MODO FANTASMA) ---
-    // AQUI É A MUDANÇA: BORDA MAIS GROSSA E FORTE
     if (ocultarCores) {
         corPreenchimento = 'transparent';
         opacidade = 0;
-        pesoBorda = 5; // Aumentado para destacar bem
-        opacidadeBorda = 0.8; // Quase sólida
+        pesoBorda = 5;
+        opacidadeBorda = 0.8;
     }
 
     const gerarLinkMsg = (uNome, uWhats) => {
@@ -395,19 +433,15 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const salvarDesignacao = async () => {
         const idSeguro = `t_${idTerritorio}`;
 
-        // --- CENÁRIO 1: DEVOLUÇÃO (ENCERRAR O CICLO) ---
         if (!usuarioSelecionado) {
             if (!dadosBanco.designadoPara) return;
-
             if (!confirm("Confirmar devolução do território?")) return;
 
-            // Recupera o ciclo atual ou cria um fallback
             const ciclo = dadosBanco.cicloAtual || {
                 dataInicio: dadosBanco.dataDesignacao || new Date(),
                 responsaveis: [dadosBanco.designadoNome]
             };
 
-            // Cria o registro final para o histórico
             const registroHistorico = {
                 ...ciclo,
                 dataTermino: new Date(),
@@ -429,7 +463,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
             await updateDoc(doc(db, "territorios", idSeguro), updateData);
 
-            // Notificação Admin
             try {
                 await addDoc(collection(db, "notificacoes"), {
                     para: "ADMINS",
@@ -444,20 +477,17 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             return;
         }
 
-        // --- CENÁRIO 2: DESIGNAÇÃO (INÍCIO OU TRANSFERÊNCIA) ---
         const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
         const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
 
         let novoCiclo = {};
 
         if (!dadosBanco.designadoPara) {
-            // INÍCIO
             novoCiclo = {
                 dataInicio: new Date(),
                 responsaveis: [novoNome]
             };
         } else {
-            // TRANSFERÊNCIA
             const responsaveisAtuais = dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome];
             novoCiclo = {
                 dataInicio: dadosBanco.cicloAtual?.dataInicio || dadosBanco.dataDesignacao,
@@ -472,7 +502,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             cicloAtual: novoCiclo
         });
 
-        // Notificação Dirigente
         try {
             await addDoc(collection(db, "notificacoes"), {
                 para: usuarioSelecionado,
@@ -490,7 +519,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const compartilharDiretamente = () => {
         const usuarioObj = listaUsuarios.find(u => u.email === dadosBanco.designadoPara);
         const msg = gerarLinkMsg(dadosBanco.designadoNome, usuarioObj?.whatsapp);
-
         const textoEncoded = encodeURIComponent(msg.texto);
         const url = msg.whatsapp ? `https://wa.me/${msg.whatsapp.replace(/\D/g, '')}?text=${textoEncoded}` : `https://wa.me/?text=${textoEncoded}`;
         window.open(url, '_blank');
@@ -515,8 +543,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const isCurrentlyAssigned = !!dadosBanco.designadoPara;
     const isSelectingToFree = !usuarioSelecionado;
 
-    // --- FILTRO DE EXIBIÇÃO ---
-    // Se não for Admin E o território não for meu -> Não mostra nada no mapa
     if (!isAdmin && !isMeu) {
         return null;
     }
@@ -629,7 +655,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                         )}
                     </div>
                 </Popup>
-                {/* Se 'ocultarCores' estiver ativo, NÃO renderizamos o Tooltip para limpar a visão */}
                 {zoomLevel > 13 && !ocultarCores && (
                     <Tooltip permanent direction="center" className="label-territorio">
                         <span className="label-nome">{nome}</span>
@@ -659,10 +684,20 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     idTerritorio={idTerritorio}
                     isFeita={dadosBanco.quadras_feitas?.includes(quadra.id)}
                     podeEditar={isAdmin || isMeu}
-                    // --- LINHA NOVA ABAIXO ---
                     nota={dadosBanco.notas_quadras ? dadosBanco.notas_quadras[quadra.id] : ''}
+                    // Passa a função para abrir o modal
+                    onAbrirNota={abrirModalNota}
                 />
             ))}
+
+            {/* RENDERIZAÇÃO DO MODAL */}
+            <ModalNota
+                isOpen={modalConfig.open}
+                dados={modalConfig.dados}
+                onClose={fecharModal}
+                onSave={salvarNota}
+                onDelete={excluirNota}
+            />
         </>
     );
 };
@@ -673,16 +708,13 @@ const Mapa = ({ user, isAdmin }) => {
     const [zoomLevel, setZoomLevel] = useState(14);
     const [listaUsuarios, setListaUsuarios] = useState([]);
     const [posicaoUsuario, setPosicaoUsuario] = useState(null);
-    const [tipoMapa, setTipoMapa] = useState('google'); // Começa com Google Padrão
-    // NOVO ESTADO DE VISIBILIDADE
+    const [tipoMapa, setTipoMapa] = useState('google');
     const [ocultarCores, setOcultarCores] = useState(false);
 
     useEffect(() => {
         fetch('./mapa.json').then(res => res.json()).then(data => setGeoJsonData(data));
         const carregarUsuarios = async () => {
-            // TRAVA DE SEGURANÇA: Só Admin carrega a lista
             if (!isAdmin) return;
-
             try {
                 const query = await getDocs(collection(db, "usuarios"));
                 const lista = query.docs.map(doc => ({
@@ -693,7 +725,7 @@ const Mapa = ({ user, isAdmin }) => {
             } catch (e) { console.error("Erro ao buscar usuários (apenas admin pode):", e); }
         };
         carregarUsuarios();
-    }, [isAdmin]); // Dependência isAdmin garante que recarregue se o status mudar
+    }, [isAdmin]);
 
     const MapEvents = () => {
         const map = useMapEvents({ zoomend: () => setZoomLevel(map.getZoom()) });
@@ -716,41 +748,18 @@ const Mapa = ({ user, isAdmin }) => {
                     <MapEvents />
                     <DeepLinkHandler />
 
-                    {/* CAMADA PADRÃO (OpenStreetMap) */}
                     {tipoMapa === 'padrao' && (
-                        <TileLayer
-                            attribution='© OpenStreetMap'
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            maxNativeZoom={19}
-                            maxZoom={22}
-                        />
+                        <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxNativeZoom={19} maxZoom={22} />
                     )}
-
-                    {/* CAMADA GOOGLE STANDARD (NOVA) */}
                     {tipoMapa === 'google' && (
-                        <TileLayer
-                            attribution='© Google Maps'
-                            url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
-                            maxNativeZoom={20}
-                            maxZoom={22}
-                        />
+                        <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />
                     )}
-
-                    {/* CAMADA SATÉLITE HÍBRIDO (Google Hybrid) */}
                     {tipoMapa === 'satelite' && (
-                        <TileLayer
-                            attribution='© Google Maps'
-                            url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
-                            maxNativeZoom={20}
-                            maxZoom={22}
-                        />
+                        <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />
                     )}
 
                     <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} />
-
-                    {/* ADICIONEI O CONTROLE DE VISIBILIDADE AQUI */}
                     <ControleVisibilidade ocultarCores={ocultarCores} setOcultarCores={setOcultarCores} />
-
                     <ControlesNavegacao setPosicaoUsuario={setPosicaoUsuario} />
                     <MarcadorUsuario posicao={posicaoUsuario} />
 
@@ -765,7 +774,7 @@ const Mapa = ({ user, isAdmin }) => {
                                 user={user}
                                 isAdmin={isAdmin}
                                 listaUsuarios={listaUsuarios}
-                                ocultarCores={ocultarCores} // Passando a prop para o filho
+                                ocultarCores={ocultarCores}
                             />
                         );
                     })}
