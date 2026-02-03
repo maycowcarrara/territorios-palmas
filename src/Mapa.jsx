@@ -5,9 +5,6 @@ import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection
 import { db } from './firebase';
 import L from 'leaflet';
 
-// ⚠️ CONFIGURAÇÃO DO ONESIGNAL (PREENCHA AQUI) ⚠️
-const ONESIGNAL_APP_ID = "468b1307-84c9-48d1-b77d-e3206c010adf";
-
 // --- CSS ---
 const cssTooltip = `
   .label-territorio { background: transparent; border: none; box-shadow: none; font-family: 'Bahnschrift', sans-serif-condensed, sans-serif; text-align: center; line-height: 1.1; pointer-events: none; }
@@ -248,7 +245,7 @@ const ModalNota = ({ isOpen, onClose, onSave, onDelete, dados }) => {
     );
 };
 
-// --- QUADRA MARKER (ATUALIZADO COM DETECÇÃO DE CONCLUSÃO) ---
+// --- QUADRA MARKER ---
 const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrirNota, totalQuadras, qtdFeitas, onConclusao }) => {
     const alternarQuadra = async () => {
         if (!podeEditar) return;
@@ -263,9 +260,7 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrir
             // Marcar como feita
             await updateDoc(docRef, { quadras_feitas: arrayUnion(quadra.id) });
 
-            // LÓGICA DE CONCLUSÃO:
-            // Se eu estou marcando agora, e a quantidade de feitas + 1 for igual ao total
-            // Significa que acabei de concluir o território!
+            // LÓGICA DE CONCLUSÃO
             if (qtdFeitas + 1 === totalQuadras) {
                 if (onConclusao) onConclusao();
             }
@@ -345,52 +340,22 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         console.log("Território concluído! Notificando admins...");
 
         try {
-            // 1. Busca quem são os ADMINS no banco
+            // 1. Busca quem são os ADMINS no banco (APENAS PARA SABER SE TEM ADMIN)
             const q = query(collection(db, "usuarios"), where("role", "==", "admin"));
             const querySnapshot = await getDocs(q);
-            const emailsAdmins = [];
-            querySnapshot.forEach((doc) => {
-                emailsAdmins.push(doc.id); // O ID é o email
-            });
-
-            if (emailsAdmins.length === 0) return;
+            
+            if (querySnapshot.empty) return;
 
             // 2. Envia Notificação Interna (Sininho) para o grupo ADMINS
+            // A CLOUD FUNCTION VAI LER ISSO E ENVIAR O PUSH AUTOMATICAMENTE!
             await addDoc(collection(db, "notificacoes"), {
                 para: "ADMINS",
                 texto: `🏁 O Território ${nome} foi 100% concluído por ${dadosBanco.designadoNome}.`,
                 data: new Date(),
                 lida: false,
-                tipo: 'devolucao', // Usa ícone de bandeira/conclusão
+                tipo: 'devolucao',
                 origem: 'sistema'
             });
-
-            // Busca chave no banco
-            const docRefConfig = doc(db, "config", "chaves");
-            const docSnapConfig = await getDoc(docRefConfig);
-            if (!docSnapConfig.exists()) return;
-            const apiKey = docSnapConfig.data().onesignal_key;
-
-            // 3. Envia PUSH para os Admins (OneSignal)
-            const options = {
-                method: 'POST',
-                headers: {
-                    accept: 'application/json',
-                    'content-type': 'application/json',
-                    Authorization: `Basic ${apiKey}` // <--- Chave do banco
-                },
-                body: JSON.stringify({
-                    app_id: ONESIGNAL_APP_ID,
-                    include_external_user_ids: emailsAdmins, // Lista de emails dos admins
-                    contents: { en: `🏁 Território ${nome} CONCLUÍDO!` },
-                    headings: { en: "Atenção: Território Finalizado" },
-                    subtitle: { en: `Por: ${dadosBanco.designadoNome}` },
-                    url: "https://maycowcarrara.github.io/territorios-palmas/"
-                })
-            };
-
-            // Dispara sem esperar (fire and forget)
-            fetch('https://onesignal.com/api/v1/notifications', options).catch(err => console.error("Erro OneSignal Conclusao", err));
 
             alert("Parabéns! Você concluiu todas as quadras. Os administradores foram notificados.");
 
@@ -546,6 +511,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             await updateDoc(doc(db, "territorios", idSeguro), updateData);
 
             try {
+                // Notifica Devolução (A Cloud Function pega isso e envia Push aos admins se configurado)
                 await addDoc(collection(db, "notificacoes"), {
                     para: "ADMINS",
                     texto: `Território ${nome} devolvido. Ciclo encerrado por ${dadosBanco.designadoNome}.`,
@@ -585,66 +551,17 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         });
 
         // -------------------------------------------------------------
-        // AQUI ESTÁ A LÓGICA DO ONESIGNAL (PUSH NA DESIGNAÇÃO)
+        // LÓGICA DE NOTIFICAÇÃO LIMPA (FRONTEND SÓ SALVA NO BANCO)
         // -------------------------------------------------------------
-        // -------------------------------------------------------------
-        // AQUI ESTÁ A LÓGICA DO ONESIGNAL (SEGURA)
-        // -------------------------------------------------------------
-        const enviarPushOneSignal = async () => {
-            try {
-                // 1. Busca a chave no banco de dados (para não ficar exposta no GitHub)
-                const docRefConfig = doc(db, "config", "chaves");
-                const docSnapConfig = await getDoc(docRefConfig);
-
-                let apiKey = "";
-                if (docSnapConfig.exists()) {
-                    apiKey = docSnapConfig.data().onesignal_key;
-                } else {
-                    console.error("Chave de API não encontrada no banco.");
-                    return;
-                }
-
-                // 2. Configura o envio
-                const ONESIGNAL_APP_ID = "468b1307-84c9-48d1-b77d-e3206c010adf"; // O App ID não é secreto, pode ficar aqui
-
-                const options = {
-                    method: 'POST',
-                    headers: {
-                        accept: 'application/json',
-                        'content-type': 'application/json',
-                        Authorization: `Basic ${apiKey}` // Usa a chave que veio do banco
-                    },
-                    body: JSON.stringify({
-                        app_id: ONESIGNAL_APP_ID,
-                        include_external_user_ids: [usuarioSelecionado],
-                        contents: { en: `O território ${nome} foi designado para você.` },
-                        headings: { en: "🌍 Nova Designação!" },
-                        url: "https://maycowcarrara.github.io/territorios-palmas/"
-                    })
-                };
-
-                await fetch('https://onesignal.com/api/v1/notifications', options);
-                console.log("Push enviado via OneSignal!");
-
-            } catch (err) {
-                console.error("Erro ao enviar Push:", err);
-            }
-        };
-
-        // Se selecionou alguém, dispara o Push (assíncrono, não trava o app)
-        if (usuarioSelecionado) {
-            enviarPushOneSignal();
-        }
-        // -------------------------------------------------------------
-
         try {
             await addDoc(collection(db, "notificacoes"), {
-                para: usuarioSelecionado,
+                para: usuarioSelecionado, // O email da pessoa
                 texto: `Território ${nome} designado para você. Bom trabalho!`,
                 data: new Date(),
                 lida: false,
                 tipo: 'designacao'
             });
+            // A Cloud Function detecta esse insert e envia o PUSH automaticamente.
         } catch (e) { }
 
         const msg = gerarLinkMsg(novoNome, usuarioObj?.whatsapp);
