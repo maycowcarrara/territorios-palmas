@@ -10,11 +10,6 @@ import Relatorios from './Relatorios';
 import appInfo from './version.json';
 import AutoUpdate from './AutoUpdate';
 import AjudaModal from './AjudaModal';
-import OneSignal from 'react-onesignal';
-
-// --- CONFIGURAÇÃO DOS APPS IDs (PROD e DEV) ---
-const ONESIGNAL_PROD_ID = "468b1307-84c9-48d1-b77d-e3206c010adf";
-const ONESIGNAL_DEV_ID = "81907387-5335-4943-82c9-35e1f18e729e";
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 let deferredPromptGlobal = null;
@@ -348,7 +343,6 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
 // --- MENU LATERAL (ATUALIZADO) ---
 const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda }) => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [notificacoesAtivas, setNotificacoesAtivas] = useState(false);
 
   useEffect(() => {
     if (deferredPromptGlobal) {
@@ -364,38 +358,6 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, []);
-
-  // Verifica se o usuário tem notificações ativas
-  useEffect(() => {
-    if (isOpen) {
-      // Pequeno delay para garantir que o OneSignal carregou
-      setTimeout(() => {
-        try {
-          const isOptedIn = OneSignal.User.PushSubscription.optedIn;
-          setNotificacoesAtivas(!!isOptedIn);
-        } catch (error) {
-          console.log("OneSignal ainda carregando...", error);
-        }
-      }, 500);
-    }
-  }, [isOpen]);
-
-  const toggleNotificacoes = async () => {
-    try {
-      if (notificacoesAtivas) {
-        await OneSignal.User.PushSubscription.optOut();
-        setNotificacoesAtivas(false);
-      } else {
-        await OneSignal.User.PushSubscription.optIn();
-        // Verifica se o usuário realmente aceitou (se ele bloquear no navegador, isso continua false)
-        const aceitou = OneSignal.User.PushSubscription.optedIn;
-        setNotificacoesAtivas(!!aceitou);
-      }
-    } catch (error) {
-      console.error("Erro ao alterar notificação:", error);
-      alert("Para ativar, você precisa permitir as notificações nas configurações do seu navegador (clique no cadeado ou ícone de configurações na barra de endereço).");
-    }
-  };
 
   const instalarApp = async () => {
     if (deferredPrompt) {
@@ -448,24 +410,6 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
             </svg>
             Mapa
           </button>
-
-          {/* BOTÃO SWITCH DE NOTIFICAÇÕES */}
-          <div className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-100">
-            <div className="flex items-center gap-3 text-gray-700 font-medium">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
-              </svg>
-              <span className="text-sm">Notificações</span>
-            </div>
-
-            <button
-              onClick={toggleNotificacoes}
-              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${notificacoesAtivas ? 'bg-green-500' : 'bg-gray-300'}`}
-              title={notificacoesAtivas ? "Desativar notificações" : "Ativar notificações"}
-            >
-              <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${notificacoesAtivas ? 'translate-x-5' : 'translate-x-0'}`}></div>
-            </button>
-          </div>
 
           <button onClick={() => { abrirLegenda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -651,7 +595,6 @@ function Dashboard() {
 // --- APP PRINCIPAL (CORRIGIDO) ---
 function App() {
   const [user, setUser] = useState(null);
-  const oneSignalInit = useRef(false); // Ref para prevenir inicialização dupla
 
   // 1. Monitora o Auth Globalmente
   useEffect(() => {
@@ -660,51 +603,6 @@ function App() {
     });
     return () => unsub();
   }, []);
-
-  // 2. Inicializa o OneSignal (CORREÇÃO PARA SUBPASTA GITHUB)
-  useEffect(() => {
-    const initOneSignal = async () => {
-      if (oneSignalInit.current) return;
-      oneSignalInit.current = true;
-
-      try {
-        const appId = "468b1307-84c9-48d1-b77d-e3206c010adf";
-        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-        // Em produção, precisamos do prefixo do repositório
-        const currentBase = isLocal ? '/' : '/territorios-palmas/';
-
-        console.log(`[OneSignal] Inicializando em modo: ${isLocal ? 'DEV' : 'PRODUÇÃO'}`);
-
-        await OneSignal.init({
-          appId: appId,
-          notifyButton: { enable: false },
-
-          // Define a pasta base para o SDK
-          path: currentBase,
-
-          // ⚠️ CORREÇÃO: Forçamos o caminho começando com o nome do repo em produção
-          // Isso evita que o navegador busque em https://maycowcarrara.github.io/
-          serviceWorkerPath: isLocal ? 'OneSignalSDKWorker.js' : 'territorios-palmas/OneSignalSDKWorker.js',
-
-          // Define que o Worker só manda na subpasta do projeto
-          serviceWorkerParam: { scope: currentBase }
-        });
-
-        if (user && user.email) {
-          const emailFormatado = user.email.toLowerCase();
-          OneSignal.login(emailFormatado);
-          OneSignal.User.addTag("email", emailFormatado);
-        }
-      } catch (error) {
-        console.warn("Aviso OneSignal:", error);
-      }
-    };
-
-    if (user) {
-      initOneSignal();
-    }
-  }, [user]);
 
   return (
     <HashRouter>

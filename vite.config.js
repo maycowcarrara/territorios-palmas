@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig(({ command }) => {
-  // Define a base: no PC (serve) é "/", no GitHub (build) é a subpasta
+  // Mantemos a base dinâmica para não quebrar o site no GitHub Pages
   const base = command === 'build' ? '/territorios-palmas/' : '/';
 
   return {
@@ -20,7 +20,7 @@ export default defineConfig(({ command }) => {
           theme_color: '#2563eb',
           background_color: '#ffffff',
           display: 'standalone',
-          start_url: base, // Segue a base dinâmica
+          start_url: base,
           icons: [
             {
               src: 'icon-192.png',
@@ -36,12 +36,12 @@ export default defineConfig(({ command }) => {
         },
 
         workbox: {
+          // Faz o cache dos arquivos essenciais para o PWA funcionar offline
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-          // Ignora os workers do OneSignal para não dar conflito com o cache do PWA
-          globIgnores: ['**/OneSignalSDKWorker.js', '**/OneSignalSDK.sw.js'],
 
           runtimeCaching: [
             {
+              // Mantemos a regra do version.json para o sistema de auto-update
               urlPattern: ({ url }) => url.pathname.includes('version.json'),
               handler: 'NetworkOnly',
             }
@@ -49,6 +49,6 @@ export default defineConfig(({ command }) => {
         }
       })
     ],
-    base: base, // Aplica a base dinâmica aqui
+    base: base,
   }
 })
