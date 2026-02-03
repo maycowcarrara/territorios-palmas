@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getMessaging } from "firebase/messaging";
 // 1. Adicione os novos imports aqui:
 import {
     getFirestore,
@@ -29,3 +30,6 @@ export const db = initializeFirestore(app, {
         tabManager: persistentMultipleTabManager()
     })
 });
+
+const messaging = getMessaging(app);
+export { auth, googleProvider, db, messaging };

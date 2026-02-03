@@ -10,6 +10,7 @@ import Relatorios from './Relatorios';
 import appInfo from './version.json';
 import AutoUpdate from './AutoUpdate';
 import AjudaModal from './AjudaModal';
+import NotificationHandler from './NotificationHandler';
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 let deferredPromptGlobal = null;
@@ -589,6 +590,7 @@ function Dashboard() {
 
       <div className="flex-1 bg-gray-100 relative z-0">
         <Mapa user={user} isAdmin={isAdmin} />
+        <NotificationHandler />
       </div>
     </div>
   );
