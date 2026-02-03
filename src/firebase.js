@@ -32,4 +32,4 @@ export const db = initializeFirestore(app, {
 });
 
 const messaging = getMessaging(app);
-export { auth, googleProvider, db, messaging };
+export { messaging };
