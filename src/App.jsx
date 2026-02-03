@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, googleProvider, db } from './firebase';
@@ -10,7 +10,11 @@ import Relatorios from './Relatorios';
 import appInfo from './version.json';
 import AutoUpdate from './AutoUpdate';
 import AjudaModal from './AjudaModal';
-import OneSignal from 'react-onesignal'; // Importação do OneSignal
+import OneSignal from 'react-onesignal';
+
+// --- CONFIGURAÇÃO DOS APPS IDs (PROD e DEV) ---
+const ONESIGNAL_PROD_ID = "468b1307-84c9-48d1-b77d-e3206c010adf";
+const ONESIGNAL_DEV_ID = "81907387-5335-4943-82c9-35e1f18e729e";
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 let deferredPromptGlobal = null;
@@ -19,13 +23,6 @@ window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPromptGlobal = e;
 });
-
-// --- FUNÇÃO AUXILIAR ---
-const calcularCentroide = (coords) => {
-  let lat = 0, lng = 0, n = coords.length;
-  coords.forEach(p => { lat += p[1]; lng += p[0]; });
-  return { lat: lat / n, lng: lng / n };
-};
 
 // --- TELA DE LOGIN ---
 function Login() {
@@ -348,12 +345,11 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
   );
 };
 
-// --- MENU LATERAL (ATUALIZADO COM BOTÃO ON/OFF) ---
+// --- MENU LATERAL (ATUALIZADO) ---
 const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda }) => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [notificacoesAtivas, setNotificacoesAtivas] = useState(false); // Estado do botão
+  const [notificacoesAtivas, setNotificacoesAtivas] = useState(false);
 
-  // 1. Verifica o status da instalação (PWA)
   useEffect(() => {
     if (deferredPromptGlobal) {
       setDeferredPrompt(deferredPromptGlobal);
@@ -369,35 +365,35 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
     };
   }, []);
 
-  // 2. Verifica o status do OneSignal ao abrir o menu
+  // Verifica se o usuário tem notificações ativas
   useEffect(() => {
     if (isOpen) {
-      try {
-        // Verifica se o usuário já aceitou as notificações no OneSignal
-        // Nota: A propriedade pode variar dependendo da versão, mas esta é a padrão v16+
-        const isOptedIn = OneSignal.User.PushSubscription.optedIn;
-        setNotificacoesAtivas(!!isOptedIn);
-      } catch (error) {
-        console.log("OneSignal ainda não carregou ou erro:", error);
-      }
+      // Pequeno delay para garantir que o OneSignal carregou
+      setTimeout(() => {
+        try {
+          const isOptedIn = OneSignal.User.PushSubscription.optedIn;
+          setNotificacoesAtivas(!!isOptedIn);
+        } catch (error) {
+          console.log("OneSignal ainda carregando...", error);
+        }
+      }, 500);
     }
   }, [isOpen]);
 
-  // 3. Função para Ligar/Desligar
   const toggleNotificacoes = async () => {
     try {
       if (notificacoesAtivas) {
-        // Se está ligado, desliga (Opt-Out)
         await OneSignal.User.PushSubscription.optOut();
         setNotificacoesAtivas(false);
       } else {
-        // Se está desligado, liga (Opt-In)
         await OneSignal.User.PushSubscription.optIn();
-        setNotificacoesAtivas(true);
+        // Verifica se o usuário realmente aceitou (se ele bloquear no navegador, isso continua false)
+        const aceitou = OneSignal.User.PushSubscription.optedIn;
+        setNotificacoesAtivas(!!aceitou);
       }
     } catch (error) {
       console.error("Erro ao alterar notificação:", error);
-      alert("Para ativar, você precisa permitir as notificações nas configurações do seu navegador (cadeado na barra de endereço).");
+      alert("Para ativar, você precisa permitir as notificações nas configurações do seu navegador (clique no cadeado ou ícone de configurações na barra de endereço).");
     }
   };
 
@@ -453,7 +449,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
             Mapa
           </button>
 
-          {/* BOTÃO SWITCH DE NOTIFICAÇÕES (NOVO) */}
+          {/* BOTÃO SWITCH DE NOTIFICAÇÕES */}
           <div className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-100">
             <div className="flex items-center gap-3 text-gray-700 font-medium">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
@@ -462,10 +458,10 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
               <span className="text-sm">Notificações</span>
             </div>
 
-            {/* O Switch Visual (Toggle) */}
             <button
               onClick={toggleNotificacoes}
               className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${notificacoesAtivas ? 'bg-green-500' : 'bg-gray-300'}`}
+              title={notificacoesAtivas ? "Desativar notificações" : "Ativar notificações"}
             >
               <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${notificacoesAtivas ? 'translate-x-5' : 'translate-x-0'}`}></div>
             </button>
@@ -655,8 +651,9 @@ function Dashboard() {
 // --- APP PRINCIPAL (CORRIGIDO) ---
 function App() {
   const [user, setUser] = useState(null);
+  const oneSignalInit = useRef(false); // Ref para prevenir inicialização dupla
 
-  // 1. Monitora o Auth Globalmente para ativar o OneSignal
+  // 1. Monitora o Auth Globalmente
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -664,27 +661,50 @@ function App() {
     return () => unsub();
   }, []);
 
-  // 2. Inicializa o OneSignal
+  // 2. Inicializa o OneSignal (CORREÇÃO PARA SUBPASTA GITHUB)
   useEffect(() => {
     const initOneSignal = async () => {
+      if (oneSignalInit.current) return;
+      oneSignalInit.current = true;
+
       try {
+        const appId = "468b1307-84c9-48d1-b77d-e3206c010adf";
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+        // Em produção, precisamos do prefixo do repositório
+        const currentBase = isLocal ? '/' : '/territorios-palmas/';
+
+        console.log(`[OneSignal] Inicializando em modo: ${isLocal ? 'DEV' : 'PRODUÇÃO'}`);
+
         await OneSignal.init({
-          appId: "468b1307-84c9-48d1-b77d-e3206c010adf", // Seu App ID
-          allowLocalhostAsSecureOrigin: true,
-          notifyButton: { enable: true },
+          appId: appId,
+          notifyButton: { enable: false },
+
+          // Define a pasta base para o SDK
+          path: currentBase,
+
+          // ⚠️ CORREÇÃO: Forçamos o caminho começando com o nome do repo em produção
+          // Isso evita que o navegador busque em https://maycowcarrara.github.io/
+          serviceWorkerPath: isLocal ? 'OneSignalSDKWorker.js' : 'territorios-palmas/OneSignalSDKWorker.js',
+
+          // Define que o Worker só manda na subpasta do projeto
+          serviceWorkerParam: { scope: currentBase }
         });
 
-        // Se logado, autentica no OneSignal
         if (user && user.email) {
-          OneSignal.login(user.email);
+          const emailFormatado = user.email.toLowerCase();
+          OneSignal.login(emailFormatado);
+          OneSignal.User.addTag("email", emailFormatado);
         }
       } catch (error) {
-        console.error("Erro OneSignal:", error);
+        console.warn("Aviso OneSignal:", error);
       }
     };
 
-    initOneSignal();
-  }, [user]); // Recarrega se o usuário mudar (logar/deslogar)
+    if (user) {
+      initOneSignal();
+    }
+  }, [user]);
 
   return (
     <HashRouter>
