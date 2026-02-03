@@ -1,18 +1,17 @@
 {
   "name": "territorios-palmas",
   "private": true,
-  "version": "1.6.108",
+  "version": "1.6.112",
   "homepage": "https://maycowcarrara.github.io/territorios-palmas",
   "type": "module",
   "scripts": {
-    "predev": "node gerar-versao.js",
     "dev": "vite",
-    "prebuild": "node gerar-versao.js",
     "build": "vite build",
-    "preview": "vite preview",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "preview": "vite preview",
+    "update-version": "node gerar-versao.js",
+    "git-push": "git add . && git commit -m \"chore: auto deploy update\" && git push",
+    "deploy": "npm run update-version && npm run git-push && npm run build && firebase deploy"
   },
   "dependencies": {
     "firebase": "^12.8.0",

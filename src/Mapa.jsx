@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker } from 'react-leaflet';
-import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, getDoc, query, where } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, getDoc, query, where, deleteField } from 'firebase/firestore';
 import { db } from './firebase';
 import L from 'leaflet';
 
@@ -68,7 +68,7 @@ const DeepLinkHandler = () => {
     useEffect(() => {
         const params = new URLSearchParams(location.search);
 
-        // 1. Tenta ler BOUNDS (Novo Método - Ajuste Perfeito)
+        // 1. Tenta ler BOUNDS
         const boundsParam = params.get('bounds');
         if (boundsParam) {
             const parts = boundsParam.split(',').map(parseFloat);
@@ -200,44 +200,136 @@ const MarcadorUsuario = ({ posicao }) => {
     );
 };
 
-// --- MODAL DE NOTAS (INTEGRADO) ---
-const ModalNota = ({ isOpen, onClose, onSave, onDelete, dados }) => {
+// --- MODAL DE NOTAS (ESTILO CHAT ATUALIZADO) ---
+const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, user, isAdmin }) => {
     const [texto, setTexto] = useState('');
+    const [editandoId, setEditandoId] = useState(null);
+    const scrollRef = useRef(null);
+
+    // Normaliza os dados para garantir que seja sempre um array
+    const notas = useMemo(() => {
+        if (!dados?.notas) return [];
+        // Suporte para legado (se for string antiga, converte para objeto visual)
+        if (typeof dados.notas === 'string') {
+            return [{ id: 'legacy', texto: dados.notas, autorNome: 'Sistema (Antigo)', data: null, autorEmail: 'sistema' }];
+        }
+        return dados.notas;
+    }, [dados]);
 
     useEffect(() => {
-        if (isOpen && dados) {
-            setTexto(dados.notaAtual || '');
+        if (isOpen) {
+            setTexto('');
+            setEditandoId(null);
+            // Scroll para baixo ao abrir
+            setTimeout(() => {
+                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }, 100);
         }
     }, [isOpen, dados]);
+
+    const handleSubmit = () => {
+        if (!texto.trim()) return;
+
+        if (editandoId) {
+            onEditar(dados.quadraId, editandoId, texto);
+        } else {
+            onAdicionar(dados.quadraId, texto);
+        }
+        setTexto('');
+        setEditandoId(null);
+    };
+
+    const iniciarEdicao = (nota) => {
+        setTexto(nota.texto);
+        setEditandoId(nota.id);
+    };
+
+    const cancelarEdicao = () => {
+        setTexto('');
+        setEditandoId(null);
+    };
 
     if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in" style={{ zIndex: 9999 }}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100">
-                <div className="bg-blue-600 p-4 flex justify-between items-center">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col h-[500px]">
+                {/* Header */}
+                <div className="bg-blue-600 p-4 flex justify-between items-center shrink-0">
                     <h3 className="text-white font-bold text-lg flex items-center gap-2">
-                        📝 Nota da Quadra {dados?.quadraId}
+                        💬 Notas da Quadra {dados?.quadraId}
                     </h3>
                     <button onClick={onClose} className="text-white/80 hover:text-white text-xl font-bold">×</button>
                 </div>
-                <div className="p-6">
-                    <p className="text-sm text-gray-500 mb-2">Edite ou visualize a observação desta quadra:</p>
-                    <textarea
-                        className="w-full h-32 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none text-gray-700"
-                        placeholder="Ex: Cachorro bravo, morador pediu para não bater..."
-                        value={texto}
-                        onChange={(e) => setTexto(e.target.value)}
-                        autoFocus
-                    />
+
+                {/* Lista de Mensagens (Chat) */}
+                <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-3" ref={scrollRef}>
+                    {notas.length === 0 && (
+                        <p className="text-center text-gray-400 text-sm italic mt-10">Nenhuma observação ainda.</p>
+                    )}
+
+                    {notas.map((nota) => {
+                        const isMe = user?.email === nota.autorEmail;
+                        const podeExcluir = isAdmin || isMe;
+                        const podeEditar = isMe;
+
+                        return (
+                            <div key={nota.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                                <div className={`max-w-[85%] rounded-lg p-3 shadow-sm relative group ${isMe ? 'bg-blue-100 text-blue-900 rounded-tr-none' : 'bg-white text-gray-800 border border-gray-200 rounded-tl-none'}`}>
+                                    {/* Autor e Data */}
+                                    <div className="flex justify-between items-center gap-4 mb-1 border-b border-black/5 pb-1">
+                                        <span className="text-[10px] font-bold uppercase opacity-70">{nota.autorNome || 'Anônimo'}</span>
+                                        <span className="text-[9px] opacity-50">
+                                            {nota.data ? new Date(nota.data).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                        </span>
+                                    </div>
+
+                                    {/* Texto */}
+                                    <p className="text-sm whitespace-pre-wrap">{nota.texto}</p>
+
+                                    {/* Ações (Hover) */}
+                                    <div className="absolute -top-2 -right-2 hidden group-hover:flex gap-1">
+                                        {podeEditar && (
+                                            <button onClick={() => iniciarEdicao(nota)} className="bg-white text-blue-600 border border-blue-200 p-1 rounded-full shadow hover:bg-blue-50" title="Editar">
+                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                            </button>
+                                        )}
+                                        {podeExcluir && (
+                                            <button onClick={() => onExcluir(dados.quadraId, nota.id)} className="bg-white text-red-600 border border-red-200 p-1 rounded-full shadow hover:bg-red-50" title="Excluir">
+                                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
-                <div className="bg-gray-50 p-4 flex justify-between items-center border-t border-gray-100">
-                    <button onClick={() => onDelete(dados.quadraId)} className="text-red-600 hover:text-red-700 text-sm font-semibold px-3 py-2 rounded hover:bg-red-50 transition-colors">
-                        🗑️ Excluir Nota
-                    </button>
+
+                {/* Input Area */}
+                <div className="p-3 bg-white border-t border-gray-200">
+                    {editandoId && (
+                        <div className="flex justify-between items-center text-xs text-blue-600 mb-2 bg-blue-50 p-1 px-2 rounded">
+                            <span>✏️ Editando mensagem...</span>
+                            <button onClick={cancelarEdicao} className="underline hover:text-blue-800">Cancelar</button>
+                        </div>
+                    )}
                     <div className="flex gap-2">
-                        <button onClick={onClose} className="px-4 py-2 text-gray-600 font-medium hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
-                        <button onClick={() => onSave(dados.quadraId, texto)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 transition-colors">Salvar</button>
+                        <textarea
+                            className="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none text-sm"
+                            placeholder="Escreva uma observação..."
+                            rows="2"
+                            value={texto}
+                            onChange={(e) => setTexto(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
+                        />
+                        <button
+                            onClick={handleSubmit}
+                            disabled={!texto.trim()}
+                            className="bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end"
+                        >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -277,6 +369,14 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrir
         }
     };
 
+    // Verifica se tem nota (compatível com string antiga ou array novo)
+    const temNota = () => {
+        if (!nota) return false;
+        if (typeof nota === 'string') return nota.trim() !== "";
+        if (Array.isArray(nota)) return nota.length > 0;
+        return false;
+    };
+
     return (
         <CircleMarker
             center={[quadra.lat, quadra.lng]}
@@ -295,8 +395,8 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrir
             <Tooltip direction="center" permanent className="sem-fundo" opacity={1}>
                 <div className="relative flex items-center justify-center w-8 h-8 overflow-visible pointer-events-none">
                     <span className="font-bold text-white text-[15px] drop-shadow-md select-none">{quadra.id}</span>
-                    {nota && nota.trim() !== "" && (
-                        <span className="absolute -top-1 -right-2 w-3 h-3 bg-yellow-400 border-2 border-white rounded-full shadow-sm z-50" title="Tem observação (Segure ou clique c/ botão direito)"></span>
+                    {temNota() && (
+                        <span className="absolute -top-1 -right-2 w-3 h-3 bg-yellow-400 border-2 border-white rounded-full shadow-sm z-50" title="Tem observações"></span>
                     )}
                 </div>
             </Tooltip>
@@ -334,20 +434,16 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     // --- NOVA FUNÇÃO: NOTIFICAR ADMINS SOBRE CONCLUSÃO ---
     const notificarConclusao = async () => {
-        // Só notifica se tiver um dirigente designado (para não notificar limpezas manuais de admin)
         if (!dadosBanco.designadoPara) return;
 
         console.log("Território concluído! Notificando admins...");
 
         try {
-            // 1. Busca quem são os ADMINS no banco (APENAS PARA SABER SE TEM ADMIN)
             const q = query(collection(db, "usuarios"), where("role", "==", "admin"));
             const querySnapshot = await getDocs(q);
-            
+
             if (querySnapshot.empty) return;
 
-            // 2. Envia Notificação Interna (Sininho) para o grupo ADMINS
-            // A CLOUD FUNCTION VAI LER ISSO E ENVIAR O PUSH AUTOMATICAMENTE!
             await addDoc(collection(db, "notificacoes"), {
                 para: "ADMINS",
                 texto: `🏁 O Território ${nome} foi 100% concluído por ${dadosBanco.designadoNome}.`,
@@ -364,11 +460,11 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         }
     };
 
-    // --- FUNÇÕES DO MODAL ---
-    const abrirModalNota = (quadraId, notaAtual) => {
+    // --- FUNÇÕES DO MODAL (ATUALIZADAS PARA FORMATO CHAT) ---
+    const abrirModalNota = (quadraId, notasAtuais) => {
         setModalConfig({
             open: true,
-            dados: { quadraId, notaAtual }
+            dados: { quadraId, notas: notasAtuais }
         });
     };
 
@@ -376,25 +472,80 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         setModalConfig({ ...modalConfig, open: false });
     };
 
-    const salvarNota = async (quadraId, novoTexto) => {
-        const podeEditar = isAdmin || isMeu;
-        if (!podeEditar) return;
+    // 1. Adicionar Nova Nota
+    const adicionarNota = async (quadraId, texto) => {
+        const idSeguro = `t_${idTerritorio}`;
+        const docRef = doc(db, "territorios", idSeguro);
+
+        const novaNota = {
+            id: crypto.randomUUID(),
+            texto: texto,
+            autorEmail: user.email,
+            autorNome: user.displayName || user.email.split('@')[0],
+            data: new Date().toISOString()
+        };
+
+        const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
+        let novoArray = [];
+
+        if (Array.isArray(notasAtuais)) {
+            novoArray = [...notasAtuais, novaNota];
+        } else if (typeof notasAtuais === 'string') {
+            // Migração automática
+            novoArray = [
+                { id: 'legacy', texto: notasAtuais, autorNome: 'Sistema', data: new Date().toISOString(), autorEmail: 'sistema' },
+                novaNota
+            ];
+        } else {
+            novoArray = [novaNota];
+        }
+
+        await updateDoc(docRef, {
+            [`notas_quadras.${quadraId}`]: novoArray
+        });
+    };
+
+    // 2. Editar Nota Existente
+    const editarNota = async (quadraId, noteId, novoTexto) => {
+        const idSeguro = `t_${idTerritorio}`;
+        const docRef = doc(db, "territorios", idSeguro);
+
+        const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
+        if (!Array.isArray(notasAtuais)) return;
+
+        const novoArray = notasAtuais.map(n => {
+            if (n.id === noteId) {
+                if (n.autorEmail !== user.email && !isAdmin) return n;
+                return { ...n, texto: novoTexto, editadoEm: new Date().toISOString() };
+            }
+            return n;
+        });
+
+        await updateDoc(docRef, {
+            [`notas_quadras.${quadraId}`]: novoArray
+        });
+    };
+
+    // 3. Excluir Nota
+    const removerNota = async (quadraId, noteId) => {
+        if (!confirm("Excluir esta mensagem?")) return;
 
         const idSeguro = `t_${idTerritorio}`;
         const docRef = doc(db, "territorios", idSeguro);
 
-        await setDoc(docRef, {
-            notas_quadras: {
-                [quadraId]: novoTexto
+        const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
+        if (!Array.isArray(notasAtuais)) {
+            if (noteId === 'legacy') {
+                await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: deleteField() });
             }
-        }, { merge: true });
+            return;
+        }
 
-        fecharModal();
-    };
+        const novoArray = notasAtuais.filter(n => n.id !== noteId);
 
-    const excluirNota = async (quadraId) => {
-        if (!confirm("Deseja realmente apagar esta nota?")) return;
-        await salvarNota(quadraId, "");
+        await updateDoc(docRef, {
+            [`notas_quadras.${quadraId}`]: novoArray
+        });
     };
 
     const usuarioAtual = user?.email;
@@ -511,7 +662,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             await updateDoc(doc(db, "territorios", idSeguro), updateData);
 
             try {
-                // Notifica Devolução (A Cloud Function pega isso e envia Push aos admins se configurado)
                 await addDoc(collection(db, "notificacoes"), {
                     para: "ADMINS",
                     texto: `Território ${nome} devolvido. Ciclo encerrado por ${dadosBanco.designadoNome}.`,
@@ -550,18 +700,14 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             cicloAtual: novoCiclo
         });
 
-        // -------------------------------------------------------------
-        // LÓGICA DE NOTIFICAÇÃO LIMPA (FRONTEND SÓ SALVA NO BANCO)
-        // -------------------------------------------------------------
         try {
             await addDoc(collection(db, "notificacoes"), {
-                para: usuarioSelecionado, // O email da pessoa
+                para: usuarioSelecionado,
                 texto: `Território ${nome} designado para você. Bom trabalho!`,
                 data: new Date(),
                 lida: false,
                 tipo: 'designacao'
             });
-            // A Cloud Function detecta esse insert e envia o PUSH automaticamente.
         } catch (e) { }
 
         const msg = gerarLinkMsg(novoNome, usuarioObj?.whatsapp);
@@ -745,13 +891,22 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 />
             ))}
 
-            {/* RENDERIZAÇÃO DO MODAL */}
+            {/* RENDERIZAÇÃO DO MODAL COM CORREÇÃO DE TEMPO REAL */}
             <ModalNota
                 isOpen={modalConfig.open}
-                dados={modalConfig.dados}
+                // O segredo está aqui: Montamos o objeto 'dados' pegando as notas 
+                // diretamente do 'dadosBanco' (que atualiza sozinho), usando o ID da quadra.
+                dados={modalConfig.open && modalConfig.dados ? {
+                    quadraId: modalConfig.dados.quadraId,
+                    notas: dadosBanco.notas_quadras?.[modalConfig.dados.quadraId]
+                } : null}
+
+                user={user}
+                isAdmin={isAdmin}
                 onClose={fecharModal}
-                onSave={salvarNota}
-                onDelete={excluirNota}
+                onAdicionar={adicionarNota}
+                onEditar={editarNota}
+                onExcluir={removerNota}
             />
         </>
     );

@@ -341,6 +341,7 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
 };
 
 // --- MENU LATERAL (ATUALIZADO) ---
+// --- MENU LATERAL (ATUALIZADO - ÍCONE LEGENDA CORRIGIDO) ---
 const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda }) => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
@@ -412,8 +413,9 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
           </button>
 
           <button onClick={() => { abrirLegenda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors font-medium">
+            {/* ÍCONE NOVO: LISTA/LEGENDA (CORRIGIDO) */}
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
             </svg>
             Legenda do Mapa
           </button>

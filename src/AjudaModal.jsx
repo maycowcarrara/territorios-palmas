@@ -1,137 +1,140 @@
-import React, { useState } from 'react';
+import React from 'react';
 
 const AjudaModal = ({ isOpen, onClose, isAdmin }) => {
-    const [abaAtiva, setAbaAtiva] = useState('dirigente'); // 'dirigente' ou 'admin'
-
     if (!isOpen) return null;
 
-    const ConteudoDirigente = () => (
-        <div className="space-y-4 text-slate-700">
-            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                <h4 className="font-bold text-blue-800 flex items-center gap-2">
-                    🗺️ O Mapa
-                </h4>
-                <p className="text-sm mt-1">
-                    O mapa mostra os territórios divididos por cores:
-                </p>
-                <ul className="text-sm list-disc list-inside mt-2 space-y-1 ml-1 text-slate-600">
-                    <li><span className="font-bold text-blue-600">Azul:</span> Território designado para você.</li>
-                    <li><span className="font-bold text-green-600">Verde:</span> Território concluído recentemente.</li>
-                    <li><span className="font-bold text-orange-500">Laranja/Vermelho:</span> Território parado há muito tempo.</li>
-                    <li><span className="font-bold text-gray-500">Cinza:</span> Ocupado por outro dirigente.</li>
-                </ul>
-            </div>
-
-            <div className="bg-green-50 p-3 rounded-lg border border-green-100">
-                <h4 className="font-bold text-green-800 flex items-center gap-2">
-                    📍 Como trabalhar (Quadras)
-                </h4>
-                <p className="text-sm mt-1">
-                    1. Dê <strong>zoom</strong> no mapa para ver as "bolinhas" (quadras).<br />
-                    2. Toque na bolinha para marcar como <span className="text-green-600 font-bold">Feita (Verde)</span>.<br />
-                    3. Toque novamente para desmarcar se errou.<br />
-                    4. O sistema salva automaticamente o progresso.
-                </p>
-            </div>
-
-            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <h4 className="font-bold text-slate-800 flex items-center gap-2">
-                    🚀 Funções Úteis
-                </h4>
-                <ul className="text-sm list-disc list-inside mt-2 space-y-1 text-slate-600">
-                    <li><strong>Você está aqui:</strong> Clique no ícone de GPS para ver sua posição.</li>
-                    <li><strong>Compartilhar:</strong> No menu do seu território, você pode enviar a localização do ponto de encontro para seu companheiro.</li>
-                    <li><strong>Instalar App:</strong> No menu lateral, clique em "Instalar Aplicativo" para ter acesso rápido.</li>
-                </ul>
-            </div>
-        </div>
-    );
-
-    const ConteudoAdmin = () => (
-        <div className="space-y-4 text-slate-700">
-            <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
-                <h4 className="font-bold text-purple-800 flex items-center gap-2">
-                    🏷️ Designar e Devolver
-                </h4>
-                <p className="text-sm mt-1">
-                    Clique em qualquer território no mapa:
-                </p>
-                <ul className="text-sm list-disc list-inside mt-2 space-y-1 ml-1 text-slate-600">
-                    <li><strong>Para Designar:</strong> Selecione o nome do dirigente na lista e clique em <span className="text-blue-600 font-bold">"Salvar Designação"</span>.</li>
-                    <li><strong>Para Devolver:</strong> Selecione a opção <em>"-- Devolver (Livre) --"</em> e clique em <span className="text-red-500 font-bold">"Confirmar Devolução"</span>.</li>
-                    <li>O sistema disponibiliza um link de WhatsApp para ser enviado ao dirigente designado.</li>
-                </ul>
-            </div>
-
-            <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100">
-                <h4 className="font-bold text-yellow-800 flex items-center gap-2">
-                    📊 Relatórios e Gestão
-                </h4>
-                <p className="text-sm mt-1">
-                    Acesse pelo Menu Lateral:
-                </p>
-                <ul className="text-sm list-disc list-inside mt-2 space-y-1 text-slate-600">
-                    <li><strong>Relatórios:</strong> Veja quais territórios estão parados há mais tempo, filtre por status e dirigentes, e exporte em PDF para preencher a S-13.</li>
-                    <li><strong>Gerenciar Usuários:</strong> Aprove novos cadastros, exclua acessos ou promova irmãos a Administradores.</li>
-                </ul>
-            </div>
-
-            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                <h4 className="font-bold text-gray-800 flex items-center gap-2">
-                    🔄 Dicas de Manutenção
-                </h4>
-                <p className="text-sm mt-1">
-                    Sempre que uma nova versão do sistema for lançada, o aplicativo atualizará automaticamente para garantir que todos vejam os mesmos dados. Verifique mais informações no rodapé do menu.
-                </p>
-            </div>
-        </div>
-    );
-
     return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col animate-fade-in overflow-hidden" onClick={e => e.stopPropagation()}>
-
-                {/* CABEÇALHO */}
-                <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
-                    <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                        <span className="text-2xl">🎓</span> Central de Ajuda
+        <div
+            className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
+            onClick={onClose}
+        >
+            <div
+                className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]"
+                onClick={e => e.stopPropagation()}
+            >
+                {/* Cabeçalho */}
+                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-blue-600 text-white shrink-0">
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Como usar o Mapa
                     </h3>
-                    <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition-colors font-bold">
-                        ✕
+                    <button onClick={onClose} className="text-white/80 hover:text-white font-bold text-2xl leading-none px-2">
+                        &times;
                     </button>
                 </div>
 
-                {/* ABAS (SÓ PARA ADMIN) */}
-                {isAdmin && (
-                    <div className="flex border-b border-gray-200 bg-gray-50">
-                        <button
-                            onClick={() => setAbaAtiva('dirigente')}
-                            className={`flex-1 py-3 text-sm font-bold transition-colors ${abaAtiva === 'dirigente' ? 'bg-white text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            Guia do Dirigente
-                        </button>
-                        <button
-                            onClick={() => setAbaAtiva('admin')}
-                            className={`flex-1 py-3 text-sm font-bold transition-colors ${abaAtiva === 'admin' ? 'bg-white text-purple-600 border-b-2 border-purple-600' : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            Guia do Admin
-                        </button>
-                    </div>
-                )}
+                {/* Conteúdo Rolável */}
+                <div className="p-6 overflow-y-auto space-y-6">
 
-                {/* CONTEÚDO COM SCROLL */}
-                <div className="p-5 overflow-y-auto custom-scrollbar">
-                    {isAdmin ? (
-                        abaAtiva === 'dirigente' ? <ConteudoDirigente /> : <ConteudoAdmin />
-                    ) : (
-                        <ConteudoDirigente />
-                    )}
+                    {/* NOVO RECURSO: Observações */}
+                    <section className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                        <h4 className="font-bold text-yellow-800 mb-3 flex items-center gap-2 text-lg">
+                            <span>💬</span> Novo: Observações nas Quadras
+                        </h4>
+                        <p className="text-sm text-gray-700 mb-3">
+                            Registre informações importantes (ex: "Cachorro bravo", "Morador da casa n° 45 pediu para não visitar...") em cada quadra.
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-4 mb-2">
+                            <div className="bg-white p-3 rounded border border-yellow-100 shadow-sm text-center">
+                                <span className="text-2xl mb-1 block">💻</span>
+                                <strong className="block text-xs text-gray-500 uppercase tracking-wide">Computador</strong>
+                                <p className="text-sm font-bold text-blue-600">Botão Direito</p>
+                                <p className="text-xs text-gray-400">no número da quadra</p>
+                            </div>
+                            <div className="bg-white p-3 rounded border border-yellow-100 shadow-sm text-center">
+                                <span className="text-2xl mb-1 block">📱</span>
+                                <strong className="block text-xs text-gray-500 uppercase tracking-wide">Celular</strong>
+                                <p className="text-sm font-bold text-blue-600">Segurar o Dedo</p>
+                                <p className="text-xs text-gray-400">Toque longo (1s)</p>
+                            </div>
+                        </div>
+                        <p className="text-xs text-gray-500 italic text-center mt-2">
+                            * Uma bolinha amarela aparecerá nas quadras que possuem anotações.
+                        </p>
+                    </section>
+
+                    <hr className="border-gray-100" />
+
+                    {/* Ferramentas Úteis (NOVA SEÇÃO) */}
+                    <section>
+                        <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                            <span className="bg-blue-100 text-blue-600 p-1 rounded">🚀</span>
+                            Ferramentas Úteis
+                        </h4>
+                        <ul className="space-y-3">
+                            <li className="flex gap-3 items-start">
+                                <div className="bg-gray-100 p-1.5 rounded text-gray-600 mt-0.5">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                                </div>
+                                <div>
+                                    <strong className="text-sm text-gray-800 block">Ver Ruas (Ocultar Cores)</strong>
+                                    <p className="text-xs text-gray-600">Use o botão de <strong>Olho</strong> (canto superior direito) para esconder as cores do mapa. Isso ajuda a ler melhor os nomes das ruas.</p>
+                                </div>
+                            </li>
+
+                            <li className="flex gap-3 items-start">
+                                <div className="bg-blue-100 p-1.5 rounded text-blue-600 mt-0.5 font-bold text-xs w-7 h-7 flex items-center justify-center">Meus</div>
+                                <div>
+                                    <strong className="text-sm text-gray-800 block">Botão "Meus"</strong>
+                                    <p className="text-xs text-gray-600">No topo da tela, clique em <strong>"Meus"</strong> para ver uma lista rápida de todos os territórios que estão com você no momento.</p>
+                                </div>
+                            </li>
+
+                            <li className="flex gap-3 items-start">
+                                <div className="bg-green-100 p-1.5 rounded text-green-600 mt-0.5">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
+                                </div>
+                                <div>
+                                    <strong className="text-sm text-gray-800 block">Ponto de Encontro</strong>
+                                    <p className="text-xs text-gray-600">Toque em <strong>qualquer lugar</strong> dentro do seu território (no mapa) para abrir a opção de compartilhar aquele local exato no WhatsApp.</p>
+                                </div>
+                            </li>
+                        </ul>
+                    </section>
+
+                    <hr className="border-gray-100" />
+
+                    {/* Básico: Marcar Quadras */}
+                    <section>
+                        <h4 className="font-bold text-gray-800 mb-2 flex items-center gap-2">
+                            <span className="bg-blue-100 text-blue-600 p-1 rounded">1</span>
+                            Marcar Quadras
+                        </h4>
+                        <p className="text-sm text-gray-600 ml-8">
+                            Basta <strong>clicar (ou tocar)</strong> na bolinha com o número da quadra para mudar a cor:
+                        </p>
+                        <div className="flex gap-4 ml-8 mt-2">
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 rounded-full bg-red-500 border border-red-700"></div>
+                                <span className="text-xs font-bold text-gray-600">Não Feito</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 rounded-full bg-green-500 border border-green-700"></div>
+                                <span className="text-xs font-bold text-gray-600">Feito</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Dica de Designação */}
+                    <section className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                        <h4 className="font-bold text-blue-800 text-sm mb-1">💡 Dica Importante</h4>
+                        <p className="text-xs text-blue-700">
+                            Use o botão de <strong>GPS</strong> (canto inferior direito) para centralizar onde você está.
+                        </p>
+                    </section>
+
                 </div>
 
-                {/* RODAPÉ */}
-                <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
-                    <button onClick={onClose} className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-lg hover:bg-slate-900 transition-transform active:scale-95 shadow-md">
-                        Entendi, vamos trabalhar!
+                {/* Rodapé */}
+                <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end shrink-0">
+                    <button
+                        onClick={onClose}
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-sm transition-colors"
+                    >
+                        Entendi, vamos lá!
                     </button>
                 </div>
             </div>
