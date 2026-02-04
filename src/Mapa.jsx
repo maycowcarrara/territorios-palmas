@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker } from 'react-leaflet';
-import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, getDoc, query, where, deleteField } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, query, where, deleteField } from 'firebase/firestore';
 import { db } from './firebase';
 import L from 'leaflet';
 
@@ -67,8 +67,6 @@ const DeepLinkHandler = () => {
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
-
-        // 1. Tenta ler BOUNDS
         const boundsParam = params.get('bounds');
         if (boundsParam) {
             const parts = boundsParam.split(',').map(parseFloat);
@@ -81,8 +79,6 @@ const DeepLinkHandler = () => {
                 return;
             }
         }
-
-        // 2. Fallback para Lat/Lng/Zoom
         const lat = params.get('lat');
         const lng = params.get('lng');
         const z = params.get('z');
@@ -97,7 +93,8 @@ const DeepLinkHandler = () => {
 
 // --- COMPONENTES DE UI ---
 
-const SeletorCamadas = ({ tipoMapa, setTipoMapa }) => {
+// [ATUALIZADO] Seletor de Camadas com novos botões
+const SeletorCamadas = ({ tipoMapa, setTipoMapa, showRefs, setShowRefs, showCondos, setShowCondos }) => {
     const alternarCamada = () => {
         if (tipoMapa === 'google') setTipoMapa('satelite');
         else if (tipoMapa === 'satelite') setTipoMapa('padrao');
@@ -120,6 +117,25 @@ const SeletorCamadas = ({ tipoMapa, setTipoMapa }) => {
 
     return (
         <div className="absolute bottom-6 left-4 z-[400] flex flex-col gap-3">
+             {/* Toggle Referências */}
+             <button
+                onClick={() => setShowRefs(!showRefs)}
+                className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showRefs ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400'}`}
+                title="Mostrar/Ocultar Pontos de Referência"
+            >
+                📍
+            </button>
+
+            {/* Toggle Condomínios */}
+            <button
+                onClick={() => setShowCondos(!showCondos)}
+                className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showCondos ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-400'}`}
+                title="Mostrar/Ocultar Condomínios"
+            >
+                🏢
+            </button>
+
+            {/* Mapa de Fundo */}
             <button
                 onClick={alternarCamada}
                 className={`map-layer-btn ${classeBotao}`}
@@ -206,10 +222,8 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
     const [editandoId, setEditandoId] = useState(null);
     const scrollRef = useRef(null);
 
-    // Normaliza os dados para garantir que seja sempre um array
     const notas = useMemo(() => {
         if (!dados?.notas) return [];
-        // Suporte para legado (se for string antiga, converte para objeto visual)
         if (typeof dados.notas === 'string') {
             return [{ id: 'legacy', texto: dados.notas, autorNome: 'Sistema (Antigo)', data: null, autorEmail: 'sistema' }];
         }
@@ -220,7 +234,6 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
         if (isOpen) {
             setTexto('');
             setEditandoId(null);
-            // Scroll para baixo ao abrir
             setTimeout(() => {
                 if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
             }, 100);
@@ -229,7 +242,6 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
 
     const handleSubmit = () => {
         if (!texto.trim()) return;
-
         if (editandoId) {
             onEditar(dados.quadraId, editandoId, texto);
         } else {
@@ -254,40 +266,30 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
     return (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-fade-in" style={{ zIndex: 9999 }}>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col h-[500px]">
-                {/* Header */}
                 <div className="bg-blue-600 p-4 flex justify-between items-center shrink-0">
                     <h3 className="text-white font-bold text-lg flex items-center gap-2">
                         💬 Notas da Quadra {dados?.quadraId}
                     </h3>
                     <button onClick={onClose} className="text-white/80 hover:text-white text-xl font-bold">×</button>
                 </div>
-
-                {/* Lista de Mensagens (Chat) */}
                 <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-3" ref={scrollRef}>
                     {notas.length === 0 && (
                         <p className="text-center text-gray-400 text-sm italic mt-10">Nenhuma observação ainda.</p>
                     )}
-
                     {notas.map((nota) => {
                         const isMe = user?.email === nota.autorEmail;
                         const podeExcluir = isAdmin || isMe;
                         const podeEditar = isMe;
-
                         return (
                             <div key={nota.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                                 <div className={`max-w-[85%] rounded-lg p-3 shadow-sm relative group ${isMe ? 'bg-blue-100 text-blue-900 rounded-tr-none' : 'bg-white text-gray-800 border border-gray-200 rounded-tl-none'}`}>
-                                    {/* Autor e Data */}
                                     <div className="flex justify-between items-center gap-4 mb-1 border-b border-black/5 pb-1">
                                         <span className="text-[10px] font-bold uppercase opacity-70">{nota.autorNome || 'Anônimo'}</span>
                                         <span className="text-[9px] opacity-50">
                                             {nota.data ? new Date(nota.data).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
                                         </span>
                                     </div>
-
-                                    {/* Texto */}
                                     <p className="text-sm whitespace-pre-wrap">{nota.texto}</p>
-
-                                    {/* Ações (Hover) */}
                                     <div className="absolute -top-2 -right-2 hidden group-hover:flex gap-1">
                                         {podeEditar && (
                                             <button onClick={() => iniciarEdicao(nota)} className="bg-white text-blue-600 border border-blue-200 p-1 rounded-full shadow hover:bg-blue-50" title="Editar">
@@ -305,8 +307,6 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
                         );
                     })}
                 </div>
-
-                {/* Input Area */}
                 <div className="p-3 bg-white border-t border-gray-200">
                     {editandoId && (
                         <div className="flex justify-between items-center text-xs text-blue-600 mb-2 bg-blue-50 p-1 px-2 rounded">
@@ -323,11 +323,7 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
                             onChange={(e) => setTexto(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
                         />
-                        <button
-                            onClick={handleSubmit}
-                            disabled={!texto.trim()}
-                            className="bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end"
-                        >
+                        <button onClick={handleSubmit} disabled={!texto.trim()} className="bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end">
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                         </button>
                     </div>
@@ -341,18 +337,13 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
 const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrirNota, totalQuadras, qtdFeitas, onConclusao }) => {
     const alternarQuadra = async () => {
         if (!podeEditar) return;
-
         const idSeguro = `t_${idTerritorio}`;
         const docRef = doc(db, "territorios", idSeguro);
 
         if (isFeita) {
-            // Desmarcar
             await updateDoc(docRef, { quadras_feitas: arrayRemove(quadra.id) });
         } else {
-            // Marcar como feita
             await updateDoc(docRef, { quadras_feitas: arrayUnion(quadra.id) });
-
-            // LÓGICA DE CONCLUSÃO
             if (qtdFeitas + 1 === totalQuadras) {
                 if (onConclusao) onConclusao();
             }
@@ -360,16 +351,10 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrir
     };
 
     const handleContextMenu = (e) => {
-        if (e.originalEvent) {
-            e.originalEvent.preventDefault();
-            e.originalEvent.stopPropagation();
-        }
-        if (podeEditar) {
-            onAbrirNota(quadra.id, nota);
-        }
+        if (e.originalEvent) { e.originalEvent.preventDefault(); e.originalEvent.stopPropagation(); }
+        if (podeEditar) { onAbrirNota(quadra.id, nota); }
     };
 
-    // Verifica se tem nota (compatível com string antiga ou array novo)
     const temNota = () => {
         if (!nota) return false;
         if (typeof nota === 'string') return nota.trim() !== "";
@@ -383,14 +368,10 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrir
             pathOptions={{
                 color: isFeita ? '#166534' : '#b91c1c',
                 fillColor: isFeita ? '#22c55e' : '#ef4444',
-                fillOpacity: 1,
-                weight: 2
+                fillOpacity: 1, weight: 2
             }}
             radius={16}
-            eventHandlers={{
-                click: alternarQuadra,
-                contextmenu: handleContextMenu
-            }}
+            eventHandlers={{ click: alternarQuadra, contextmenu: handleContextMenu }}
         >
             <Tooltip direction="center" permanent className="sem-fundo" opacity={1}>
                 <div className="relative flex items-center justify-center w-8 h-8 overflow-visible pointer-events-none">
@@ -404,17 +385,32 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrir
     );
 };
 
-// --- TERRITÓRIO DETALHADO ATUALIZADO ---
-const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, listaUsuarios, ocultarCores }) => {
+// --- TERRITÓRIO DETALHADO ATUALIZADO [COM CAMADAS] ---
+const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, listaUsuarios, ocultarCores, showRefs, showCondos }) => {
     const [dadosBanco, setDadosBanco] = useState({ status: 'aberto', quadras_feitas: [], designadoPara: null, designadoNome: null, ultimaConclusao: null });
     const [usuarioSelecionado, setUsuarioSelecionado] = useState("");
     const [msgPronta, setMsgPronta] = useState(null);
     const [posicaoClique, setPosicaoClique] = useState(null);
-
-    // ESTADO DO MODAL ADICIONADO AQUI
     const [modalConfig, setModalConfig] = useState({ open: false, dados: null });
 
-    const listaQuadras = (dados.properties.pontos || []).map((p, index) => ({ id: index + 1, lat: p.lat, lng: p.lng }));
+    // --- NOVA LÓGICA DE FILTRAGEM DE PONTOS ---
+    const pontosFiltrados = useMemo(() => {
+        const todos = dados.properties.pontos || [];
+        // Compatibilidade: Se não tiver "tipo", assume que é quadra (trabalho)
+        return {
+            trabalho: todos.filter(p => !p.tipo || p.tipo === 'quadra' || p.tipo === 'endereco'),
+            referencias: todos.filter(p => p.tipo === 'referencia'),
+            condominios: todos.filter(p => p.tipo === 'condominio')
+        };
+    }, [dados]);
+
+    // A lista de quadras para progresso usa apenas os pontos de trabalho
+    const listaQuadras = pontosFiltrados.trabalho.map((p, index) => ({ 
+        id: p.nome || (index + 1), // Usa o nome real da quadra (ex: "12") se disponível
+        lat: p.lat, 
+        lng: p.lng 
+    }));
+
     const nome = dados.properties.nome || `T-${idTerritorio}`;
     const coords = dados.geometry.coordinates[0];
     const posicoes = coords.map(coord => [coord[1], coord[0]]);
@@ -432,18 +428,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         return () => unsub();
     }, [idTerritorio, nome]);
 
-    // --- NOVA FUNÇÃO: NOTIFICAR ADMINS SOBRE CONCLUSÃO ---
     const notificarConclusao = async () => {
         if (!dadosBanco.designadoPara) return;
-
-        console.log("Território concluído! Notificando admins...");
-
         try {
             const q = query(collection(db, "usuarios"), where("role", "==", "admin"));
             const querySnapshot = await getDocs(q);
-
             if (querySnapshot.empty) return;
-
             await addDoc(collection(db, "notificacoes"), {
                 para: "ADMINS",
                 texto: `🏁 O Território ${nome} foi 100% concluído por ${dadosBanco.designadoNome}.`,
@@ -452,67 +442,35 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 tipo: 'devolucao',
                 origem: 'sistema'
             });
-
             alert("Parabéns! Você concluiu todas as quadras. Os administradores foram notificados.");
-
-        } catch (error) {
-            console.error("Erro ao notificar conclusão:", error);
-        }
+        } catch (error) { console.error(error); }
     };
 
-    // --- FUNÇÕES DO MODAL (ATUALIZADAS PARA FORMATO CHAT) ---
     const abrirModalNota = (quadraId, notasAtuais) => {
-        setModalConfig({
-            open: true,
-            dados: { quadraId, notas: notasAtuais }
-        });
+        setModalConfig({ open: true, dados: { quadraId, notas: notasAtuais } });
     };
 
     const fecharModal = () => {
         setModalConfig({ ...modalConfig, open: false });
     };
 
-    // 1. Adicionar Nova Nota
     const adicionarNota = async (quadraId, texto) => {
         const idSeguro = `t_${idTerritorio}`;
         const docRef = doc(db, "territorios", idSeguro);
-
-        const novaNota = {
-            id: crypto.randomUUID(),
-            texto: texto,
-            autorEmail: user.email,
-            autorNome: user.displayName || user.email.split('@')[0],
-            data: new Date().toISOString()
-        };
-
+        const novaNota = { id: crypto.randomUUID(), texto: texto, autorEmail: user.email, autorNome: user.displayName || user.email.split('@')[0], data: new Date().toISOString() };
         const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
         let novoArray = [];
-
-        if (Array.isArray(notasAtuais)) {
-            novoArray = [...notasAtuais, novaNota];
-        } else if (typeof notasAtuais === 'string') {
-            // Migração automática
-            novoArray = [
-                { id: 'legacy', texto: notasAtuais, autorNome: 'Sistema', data: new Date().toISOString(), autorEmail: 'sistema' },
-                novaNota
-            ];
-        } else {
-            novoArray = [novaNota];
-        }
-
-        await updateDoc(docRef, {
-            [`notas_quadras.${quadraId}`]: novoArray
-        });
+        if (Array.isArray(notasAtuais)) { novoArray = [...notasAtuais, novaNota]; } 
+        else if (typeof notasAtuais === 'string') { novoArray = [{ id: 'legacy', texto: notasAtuais, autorNome: 'Sistema', data: new Date().toISOString(), autorEmail: 'sistema' }, novaNota]; } 
+        else { novoArray = [novaNota]; }
+        await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: novoArray });
     };
 
-    // 2. Editar Nota Existente
     const editarNota = async (quadraId, noteId, novoTexto) => {
         const idSeguro = `t_${idTerritorio}`;
         const docRef = doc(db, "territorios", idSeguro);
-
         const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
         if (!Array.isArray(notasAtuais)) return;
-
         const novoArray = notasAtuais.map(n => {
             if (n.id === noteId) {
                 if (n.autorEmail !== user.email && !isAdmin) return n;
@@ -520,32 +478,20 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             }
             return n;
         });
-
-        await updateDoc(docRef, {
-            [`notas_quadras.${quadraId}`]: novoArray
-        });
+        await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: novoArray });
     };
 
-    // 3. Excluir Nota
     const removerNota = async (quadraId, noteId) => {
         if (!confirm("Excluir esta mensagem?")) return;
-
         const idSeguro = `t_${idTerritorio}`;
         const docRef = doc(db, "territorios", idSeguro);
-
         const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
         if (!Array.isArray(notasAtuais)) {
-            if (noteId === 'legacy') {
-                await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: deleteField() });
-            }
+            if (noteId === 'legacy') { await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: deleteField() }); }
             return;
         }
-
         const novoArray = notasAtuais.filter(n => n.id !== noteId);
-
-        await updateDoc(docRef, {
-            [`notas_quadras.${quadraId}`]: novoArray
-        });
+        await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: novoArray });
     };
 
     const usuarioAtual = user?.email;
@@ -554,10 +500,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const isOcupado = donoDoTerritorio && !isMeu;
     const isCompleto = listaQuadras.length > 0 && dadosBanco.quadras_feitas?.length === listaQuadras.length;
 
-    // VARIÁVEIS PARA A LÓGICA DE CONCLUSÃO
     const feitas = dadosBanco.quadras_feitas?.length || 0;
     const total = listaQuadras.length;
-
     const porcentagem = total > 0 ? (feitas / total) * 100 : 0;
     const deveMostrarQuadras = zoomLevel >= 16 && (isAdmin || isMeu);
     const podeVerDetalhes = isAdmin || isMeu;
@@ -570,56 +514,16 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         textoTempo = diasSemTrabalhar > 60 ? `${Math.floor(diasSemTrabalhar / 30)} meses` : `${diasSemTrabalhar} dias`;
     }
 
-    // Variáveis de Estilo
-    let corPreenchimento = '#fed7aa';
-    let corBorda = '#c2410c';
-    let pesoBorda = 1;
-    let opacidade = 0.5;
-    let opacidadeBorda = 1;
+    let corPreenchimento = '#fed7aa'; let corBorda = '#c2410c'; let pesoBorda = 1; let opacidade = 0.5; let opacidadeBorda = 1;
 
-    if (isCompleto) {
-        corPreenchimento = '#22c55e';
-        corBorda = '#15803d';
-        opacidade = 0.6;
-        if (isMeu) pesoBorda = 3;
-    }
-    else if (isMeu) {
-        corPreenchimento = '#3b82f6';
-        corBorda = '#1e40af';
-        pesoBorda = 3;
-        if (isAdmin) {
-            corPreenchimento = '#a855f7';
-            corBorda = '#6b21a8';
-        }
-    }
-    else if (isOcupado) {
-        corPreenchimento = '#9ca3af';
-        corBorda = '#4b5563';
-        opacidade = 0.4;
-    }
+    if (isCompleto) { corPreenchimento = '#22c55e'; corBorda = '#15803d'; opacidade = 0.6; if (isMeu) pesoBorda = 3; }
+    else if (isMeu) { corPreenchimento = '#3b82f6'; corBorda = '#1e40af'; pesoBorda = 3; if (isAdmin) { corPreenchimento = '#a855f7'; corBorda = '#6b21a8'; } }
+    else if (isOcupado) { corPreenchimento = '#9ca3af'; corBorda = '#4b5563'; opacidade = 0.4; }
     else {
-        if (diasSemTrabalhar > 180) {
-            corPreenchimento = '#ea580c';
-        } else if (diasSemTrabalhar > 120) {
-            corPreenchimento = '#f97316';
-        } else if (diasSemTrabalhar > 60) {
-            corPreenchimento = '#fb923c';
-        } else {
-            corPreenchimento = '#fed7aa';
-        }
+        if (diasSemTrabalhar > 180) { corPreenchimento = '#ea580c'; } else if (diasSemTrabalhar > 120) { corPreenchimento = '#f97316'; } else if (diasSemTrabalhar > 60) { corPreenchimento = '#fb923c'; } else { corPreenchimento = '#fed7aa'; }
     }
-
-    if (!isAdmin && !isMeu) {
-        opacidade = 0.2;
-        opacidadeBorda = 0.4;
-    }
-
-    if (ocultarCores) {
-        corPreenchimento = 'transparent';
-        opacidade = 0;
-        pesoBorda = 5;
-        opacidadeBorda = 0.8;
-    }
+    if (!isAdmin && !isMeu) { opacidade = 0.2; opacidadeBorda = 0.4; }
+    if (ocultarCores) { corPreenchimento = 'transparent'; opacidade = 0; pesoBorda = 5; opacidadeBorda = 0.8; }
 
     const gerarLinkMsg = (uNome, uWhats) => {
         const baseUrl = window.location.href.split('?')[0].split('#')[0] + '#/app';
@@ -630,86 +534,25 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     const salvarDesignacao = async () => {
         const idSeguro = `t_${idTerritorio}`;
-
         if (!usuarioSelecionado) {
             if (!dadosBanco.designadoPara) return;
             if (!confirm("Confirmar devolução do território?")) return;
-
-            const ciclo = dadosBanco.cicloAtual || {
-                dataInicio: dadosBanco.dataDesignacao || new Date(),
-                responsaveis: [dadosBanco.designadoNome]
-            };
-
-            const registroHistorico = {
-                ...ciclo,
-                dataTermino: new Date(),
-                responsaveis: [...new Set([...(ciclo.responsaveis || []), dadosBanco.designadoNome])]
-            };
-
-            const updateData = {
-                designadoPara: null,
-                designadoNome: null,
-                dataDesignacao: null,
-                cicloAtual: null,
-                historico: arrayUnion(registroHistorico)
-            };
-
-            if (isCompleto) {
-                updateData.ultimaConclusao = new Date();
-                updateData.quadras_feitas = [];
-            }
-
+            const ciclo = dadosBanco.cicloAtual || { dataInicio: dadosBanco.dataDesignacao || new Date(), responsaveis: [dadosBanco.designadoNome] };
+            const registroHistorico = { ...ciclo, dataTermino: new Date(), responsaveis: [...new Set([...(ciclo.responsaveis || []), dadosBanco.designadoNome])] };
+            const updateData = { designadoPara: null, designadoNome: null, dataDesignacao: null, cicloAtual: null, historico: arrayUnion(registroHistorico) };
+            if (isCompleto) { updateData.ultimaConclusao = new Date(); updateData.quadras_feitas = []; }
             await updateDoc(doc(db, "territorios", idSeguro), updateData);
-
-            try {
-                await addDoc(collection(db, "notificacoes"), {
-                    para: "ADMINS",
-                    texto: `Território ${nome} devolvido. Ciclo encerrado por ${dadosBanco.designadoNome}.`,
-                    data: new Date(),
-                    lida: false,
-                    tipo: 'devolucao'
-                });
-            } catch (e) { }
-
+            try { await addDoc(collection(db, "notificacoes"), { para: "ADMINS", texto: `Território ${nome} devolvido. Ciclo encerrado por ${dadosBanco.designadoNome}.`, data: new Date(), lida: false, tipo: 'devolucao' }); } catch (e) { }
             setMsgPronta(null);
             return;
         }
-
         const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
         const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
-
         let novoCiclo = {};
-
-        if (!dadosBanco.designadoPara) {
-            novoCiclo = {
-                dataInicio: new Date(),
-                responsaveis: [novoNome]
-            };
-        } else {
-            const responsaveisAtuais = dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome];
-            novoCiclo = {
-                dataInicio: dadosBanco.cicloAtual?.dataInicio || dadosBanco.dataDesignacao,
-                responsaveis: [...new Set([...responsaveisAtuais, novoNome])]
-            };
-        }
-
-        await updateDoc(doc(db, "territorios", idSeguro), {
-            designadoPara: usuarioSelecionado,
-            designadoNome: novoNome,
-            dataDesignacao: new Date(),
-            cicloAtual: novoCiclo
-        });
-
-        try {
-            await addDoc(collection(db, "notificacoes"), {
-                para: usuarioSelecionado,
-                texto: `Território ${nome} designado para você. Bom trabalho!`,
-                data: new Date(),
-                lida: false,
-                tipo: 'designacao'
-            });
-        } catch (e) { }
-
+        if (!dadosBanco.designadoPara) { novoCiclo = { dataInicio: new Date(), responsaveis: [novoNome] }; } 
+        else { const responsaveisAtuais = dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome]; novoCiclo = { dataInicio: dadosBanco.cicloAtual?.dataInicio || dadosBanco.dataDesignacao, responsaveis: [...new Set([...responsaveisAtuais, novoNome])] }; }
+        await updateDoc(doc(db, "territorios", idSeguro), { designadoPara: usuarioSelecionado, designadoNome: novoNome, dataDesignacao: new Date(), cicloAtual: novoCiclo });
+        try { await addDoc(collection(db, "notificacoes"), { para: usuarioSelecionado, texto: `Território ${nome} designado para você. Bom trabalho!`, data: new Date(), lida: false, tipo: 'designacao' }); } catch (e) { }
         const msg = gerarLinkMsg(novoNome, usuarioObj?.whatsapp);
         setMsgPronta(msg);
     };
@@ -741,9 +584,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const isCurrentlyAssigned = !!dadosBanco.designadoPara;
     const isSelectingToFree = !usuarioSelecionado;
 
-    if (!isAdmin && !isMeu) {
-        return null;
-    }
+    if (!isAdmin && !isMeu) return null;
 
     return (
         <>
@@ -758,7 +599,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                             <strong className="text-lg font-bold text-gray-800 block">{nome}</strong>
                             {dadosBanco.ultimaConclusao && <span className="text-[10px] text-gray-500 uppercase">Última vez: {textoTempo} atrás</span>}
                         </div>
-
                         <div className="mb-3">
                             <div className="flex justify-between text-xs text-gray-600 mb-1 font-medium"><span>{feitas} de {total} quadras</span><span>{Math.round(porcentagem)}%</span></div>
                             <div className="w-full bg-gray-200 rounded-full h-2 border border-gray-300 overflow-hidden"><div className={`h-full transition-all duration-500 ${isCompleto ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${porcentagem}%` }}></div></div>
@@ -785,45 +625,22 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                                 <span className="text-sm font-bold text-green-600 block">Livre (Disponível)</span>
                                             )}
                                         </div>
-
                                         <label className="text-[10px] uppercase font-bold text-gray-400 mb-1 block">Ação / Alterar para:</label>
-                                        <select
-                                            className="w-full p-2 mb-2 text-sm bg-white border border-gray-300 rounded focus:border-blue-500 outline-none"
-                                            value={usuarioSelecionado}
-                                            onChange={(e) => setUsuarioSelecionado(e.target.value)}
-                                        >
+                                        <select className="w-full p-2 mb-2 text-sm bg-white border border-gray-300 rounded focus:border-blue-500 outline-none" value={usuarioSelecionado} onChange={(e) => setUsuarioSelecionado(e.target.value)}>
                                             <option value="">-- Devolver (Livre) --</option>
                                             {listaUsuarios.map(u => (
-                                                <option key={u.email} value={u.email} className={u.email === user.email ? "font-bold text-blue-600" : ""}>
-                                                    {u.nome} {u.whatsapp ? "📱" : ""}
-                                                </option>
+                                                <option key={u.email} value={u.email} className={u.email === user.email ? "font-bold text-blue-600" : ""}>{u.nome} {u.whatsapp ? "📱" : ""}</option>
                                             ))}
                                         </select>
-
-                                        <button
-                                            onClick={salvarDesignacao}
-                                            disabled={!isCurrentlyAssigned && isSelectingToFree}
-                                            className={`popup-btn-action text-white mb-2 ${!isCurrentlyAssigned && isSelectingToFree ? 'bg-gray-300 cursor-not-allowed text-gray-500' :
-                                                isSelectingToFree ? 'bg-red-500 hover:bg-red-600' :
-                                                    'bg-blue-600 hover:bg-blue-700'
-                                                }`}
-                                        >
-                                            {!isCurrentlyAssigned && isSelectingToFree ? "Já está Disponível" :
-                                                isSelectingToFree ? "Confirmar Devolução" :
-                                                    "Salvar Designação"}
+                                        <button onClick={salvarDesignacao} disabled={!isCurrentlyAssigned && isSelectingToFree} className={`popup-btn-action text-white mb-2 ${!isCurrentlyAssigned && isSelectingToFree ? 'bg-gray-300 cursor-not-allowed text-gray-500' : isSelectingToFree ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                            {!isCurrentlyAssigned && isSelectingToFree ? "Já está Disponível" : isSelectingToFree ? "Confirmar Devolução" : "Salvar Designação"}
                                         </button>
-
                                         {donoDoTerritorio && (
-                                            <button onClick={compartilharDiretamente} className="popup-btn-action bg-white border border-green-600 text-green-700 hover:bg-green-50 text-xs py-1">
-                                                Compartilhar Novamente
-                                            </button>
+                                            <button onClick={compartilharDiretamente} className="popup-btn-action bg-white border border-green-600 text-green-700 hover:bg-green-50 text-xs py-1">Compartilhar Novamente</button>
                                         )}
-
                                         {isMeu && (
                                             <div className="pt-2 mt-2 border-t border-gray-200">
-                                                <button onClick={compartilharPontoEncontro} className="popup-btn-action bg-green-600 text-white hover:bg-green-700 shadow-md w-full">
-                                                    Compartilhar este ponto de encontro
-                                                </button>
+                                                <button onClick={compartilharPontoEncontro} className="popup-btn-action bg-green-600 text-white hover:bg-green-700 shadow-md w-full">Compartilhar este ponto de encontro</button>
                                                 <p className="text-[9px] text-gray-400 text-center mt-1">O link será do local exato onde você clicou.</p>
                                             </div>
                                         )}
@@ -843,10 +660,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                     </>
                                 ) : (
                                     <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded border border-gray-200">
-                                        {isOcupado ?
-                                            <>Ocupado por: <strong className="text-gray-700">{dadosBanco.designadoNome}</strong></> :
-                                            "Disponível para trabalho."
-                                        }
+                                        {isOcupado ? <>Ocupado por: <strong className="text-gray-700">{dadosBanco.designadoNome}</strong></> : "Disponível para trabalho."}
                                     </div>
                                 )}
                             </div>
@@ -858,23 +672,16 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                         <span className="label-nome">{nome}</span>
                         {podeVerDetalhes && (
                             <>
-                                {!isOcupado && !isCompleto && (
-                                    <>
-                                        <span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca feito"}</span>
-                                        <span className="label-tempo">{textoTempo}</span>
-                                    </>
-                                )}
-                                {isOcupado && (
-                                    <span className="label-status" style={{ color: '#666' }}>Ocupado</span>
-                                )}
-                                {isCompleto && (
-                                    <span className="label-status" style={{ color: '#166534', background: '#dcfce7' }}>Feito!</span>
-                                )}
+                                {!isOcupado && !isCompleto && (<><span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca feito"}</span><span className="label-tempo">{textoTempo}</span></>)}
+                                {isOcupado && (<span className="label-status" style={{ color: '#666' }}>Ocupado</span>)}
+                                {isCompleto && (<span className="label-status" style={{ color: '#166534', background: '#dcfce7' }}>Feito!</span>)}
                             </>
                         )}
                     </Tooltip>
                 )}
             </Polygon>
+
+            {/* RENDERIZAÇÃO DAS QUADRAS (WORK POINTS) */}
             {deveMostrarQuadras && listaQuadras.map(quadra => (
                 <QuadraMarker
                     key={quadra.id}
@@ -884,23 +691,37 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     podeEditar={isAdmin || isMeu}
                     nota={dadosBanco.notas_quadras ? dadosBanco.notas_quadras[quadra.id] : ''}
                     onAbrirNota={abrirModalNota}
-                    // --- PROPS PARA CONTROLE DE CONCLUSÃO ---
                     totalQuadras={total}
                     qtdFeitas={feitas}
                     onConclusao={notificarConclusao}
                 />
             ))}
 
-            {/* RENDERIZAÇÃO DO MODAL COM CORREÇÃO DE TEMPO REAL */}
+            {/* RENDERIZAÇÃO DE REFERÊNCIAS */}
+            {deveMostrarQuadras && showRefs && pontosFiltrados.referencias.map((ref, idx) => (
+                <Marker 
+                    key={`ref-${idx}`} 
+                    position={[ref.lat, ref.lng]}
+                    icon={L.divIcon({ className: 'bg-transparent', html: `<div class="text-xl drop-shadow-sm transform hover:scale-125 transition-transform cursor-help">📍</div>`, iconAnchor: [12, 12] })}
+                >
+                    <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs">{ref.nome}</Tooltip>
+                </Marker>
+            ))}
+
+            {/* RENDERIZAÇÃO DE CONDOMÍNIOS */}
+            {deveMostrarQuadras && showCondos && pontosFiltrados.condominios.map((c, idx) => (
+                <Marker 
+                    key={`cdo-${idx}`} 
+                    position={[c.lat, c.lng]}
+                    icon={L.divIcon({ className: 'bg-transparent', html: `<div class="text-xl drop-shadow-sm transform hover:scale-125 transition-transform cursor-help">🏢</div>`, iconAnchor: [12, 12] })}
+                >
+                    <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs text-blue-800">{c.nome}</Tooltip>
+                </Marker>
+            ))}
+
             <ModalNota
                 isOpen={modalConfig.open}
-                // O segredo está aqui: Montamos o objeto 'dados' pegando as notas 
-                // diretamente do 'dadosBanco' (que atualiza sozinho), usando o ID da quadra.
-                dados={modalConfig.open && modalConfig.dados ? {
-                    quadraId: modalConfig.dados.quadraId,
-                    notas: dadosBanco.notas_quadras?.[modalConfig.dados.quadraId]
-                } : null}
-
+                dados={modalConfig.open && modalConfig.dados ? { quadraId: modalConfig.dados.quadraId, notas: dadosBanco.notas_quadras?.[modalConfig.dados.quadraId] } : null}
                 user={user}
                 isAdmin={isAdmin}
                 onClose={fecharModal}
@@ -920,6 +741,10 @@ const Mapa = ({ user, isAdmin }) => {
     const [posicaoUsuario, setPosicaoUsuario] = useState(null);
     const [tipoMapa, setTipoMapa] = useState('google');
     const [ocultarCores, setOcultarCores] = useState(false);
+    
+    // --- ESTADOS DAS CAMADAS ---
+    const [showRefs, setShowRefs] = useState(true);
+    const [showCondos, setShowCondos] = useState(true);
 
     useEffect(() => {
         fetch('./mapa.json').then(res => res.json()).then(data => setGeoJsonData(data));
@@ -927,12 +752,10 @@ const Mapa = ({ user, isAdmin }) => {
             if (!isAdmin) return;
             try {
                 const query = await getDocs(collection(db, "usuarios"));
-                const lista = query.docs.map(doc => ({
-                    email: doc.id, nome: doc.data().nome || "Sem Nome", role: doc.data().role, whatsapp: doc.data().whatsapp
-                }));
+                const lista = query.docs.map(doc => ({ email: doc.id, nome: doc.data().nome || "Sem Nome", role: doc.data().role, whatsapp: doc.data().whatsapp }));
                 lista.sort((a, b) => a.nome.localeCompare(b.nome));
                 setListaUsuarios(lista);
-            } catch (e) { console.error("Erro ao buscar usuários (apenas admin pode):", e); }
+            } catch (e) { console.error("Erro ao buscar usuários:", e); }
         };
         carregarUsuarios();
     }, [isAdmin]);
@@ -948,27 +771,18 @@ const Mapa = ({ user, isAdmin }) => {
             {!geoJsonData ? (
                 <div className="flex h-full items-center justify-center bg-gray-100"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>
             ) : (
-                <MapContainer
-                    center={[-26.485, -51.995]}
-                    zoom={14}
-                    maxZoom={22}
-                    zoomControl={false}
-                    className="h-full w-full z-0"
-                >
+                <MapContainer center={[-26.485, -51.995]} zoom={14} maxZoom={22} zoomControl={false} className="h-full w-full z-0">
                     <MapEvents />
                     <DeepLinkHandler />
+                    {tipoMapa === 'padrao' && <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxNativeZoom={19} maxZoom={22} />}
+                    {tipoMapa === 'google' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
+                    {tipoMapa === 'satelite' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
 
-                    {tipoMapa === 'padrao' && (
-                        <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxNativeZoom={19} maxZoom={22} />
-                    )}
-                    {tipoMapa === 'google' && (
-                        <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />
-                    )}
-                    {tipoMapa === 'satelite' && (
-                        <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />
-                    )}
-
-                    <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} />
+                    <SeletorCamadas 
+                        tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} 
+                        showRefs={showRefs} setShowRefs={setShowRefs}
+                        showCondos={showCondos} setShowCondos={setShowCondos}
+                    />
                     <ControleVisibilidade ocultarCores={ocultarCores} setOcultarCores={setOcultarCores} />
                     <ControlesNavegacao setPosicaoUsuario={setPosicaoUsuario} />
                     <MarcadorUsuario posicao={posicaoUsuario} />
@@ -985,6 +799,8 @@ const Mapa = ({ user, isAdmin }) => {
                                 isAdmin={isAdmin}
                                 listaUsuarios={listaUsuarios}
                                 ocultarCores={ocultarCores}
+                                showRefs={showRefs}
+                                showCondos={showCondos}
                             />
                         );
                     })}
