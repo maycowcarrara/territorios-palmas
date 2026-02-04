@@ -118,8 +118,8 @@ const SeletorCamadas = ({ tipoMapa, setTipoMapa, showRefs, setShowRefs, showCond
 
     return (
         <div className="absolute bottom-6 left-4 z-[400] flex flex-col gap-3">
-             {/* Toggle Referências */}
-             <button
+            {/* Toggle Referências */}
+            <button
                 onClick={() => setShowRefs(!showRefs)}
                 className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showRefs ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400'}`}
                 title="Mostrar/Ocultar Pontos de Referência"
@@ -406,10 +406,10 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     }, [dados]);
 
     // A lista de quadras para progresso usa apenas os pontos de trabalho
-    const listaQuadras = pontosFiltrados.trabalho.map((p, index) => ({ 
+    const listaQuadras = pontosFiltrados.trabalho.map((p, index) => ({
         id: p.nome || (index + 1), // Usa o nome real da quadra (ex: "12") se disponível
-        lat: p.lat, 
-        lng: p.lng 
+        lat: p.lat,
+        lng: p.lng
     }));
 
     const nome = dados.properties.nome || `T-${idTerritorio}`;
@@ -461,8 +461,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         const novaNota = { id: crypto.randomUUID(), texto: texto, autorEmail: user.email, autorNome: user.displayName || user.email.split('@')[0], data: new Date().toISOString() };
         const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
         let novoArray = [];
-        if (Array.isArray(notasAtuais)) { novoArray = [...notasAtuais, novaNota]; } 
-        else if (typeof notasAtuais === 'string') { novoArray = [{ id: 'legacy', texto: notasAtuais, autorNome: 'Sistema', data: new Date().toISOString(), autorEmail: 'sistema' }, novaNota]; } 
+        if (Array.isArray(notasAtuais)) { novoArray = [...notasAtuais, novaNota]; }
+        else if (typeof notasAtuais === 'string') { novoArray = [{ id: 'legacy', texto: notasAtuais, autorNome: 'Sistema', data: new Date().toISOString(), autorEmail: 'sistema' }, novaNota]; }
         else { novoArray = [novaNota]; }
         await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: novoArray });
     };
@@ -504,8 +504,14 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const feitas = dadosBanco.quadras_feitas?.length || 0;
     const total = listaQuadras.length;
     const porcentagem = total > 0 ? (feitas / total) * 100 : 0;
-    const deveMostrarQuadras = zoomLevel >= 16 && (isAdmin || isMeu);
+
+    // --- LÓGICA DE VISIBILIDADE ATUALIZADA ---
+    // Quadras agora só aparecem no zoom 17+
+    const deveMostrarQuadras = zoomLevel >= 17 && (isAdmin || isMeu);
     const podeVerDetalhes = isAdmin || isMeu;
+
+    // Nome curto (Código) para Zoom 14-15
+    const codigoTerritorio = nome.includes('-') ? nome.split('-')[0].trim() : nome;
 
     let diasSemTrabalhar = 0;
     let textoTempo = "Nunca";
@@ -550,7 +556,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
         const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
         let novoCiclo = {};
-        if (!dadosBanco.designadoPara) { novoCiclo = { dataInicio: new Date(), responsaveis: [novoNome] }; } 
+        if (!dadosBanco.designadoPara) { novoCiclo = { dataInicio: new Date(), responsaveis: [novoNome] }; }
         else { const responsaveisAtuais = dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome]; novoCiclo = { dataInicio: dadosBanco.cicloAtual?.dataInicio || dadosBanco.dataDesignacao, responsaveis: [...new Set([...responsaveisAtuais, novoNome])] }; }
         await updateDoc(doc(db, "territorios", idSeguro), { designadoPara: usuarioSelecionado, designadoNome: novoNome, dataDesignacao: new Date(), cicloAtual: novoCiclo });
         try { await addDoc(collection(db, "notificacoes"), { para: usuarioSelecionado, texto: `Território ${nome} designado para você. Bom trabalho!`, data: new Date(), lida: false, tipo: 'designacao' }); } catch (e) { }
@@ -669,10 +675,16 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                         )}
                     </div>
                 </Popup>
-                {zoomLevel > 13 && !ocultarCores && (
+                {/* TOOLTIP: Visível a partir do Zoom 14 (inclusive) */}
+                {zoomLevel >= 14 && !ocultarCores && (
                     <Tooltip permanent direction="center" className="label-territorio">
-                        <span className="label-nome">{nome}</span>
-                        {podeVerDetalhes && (
+                        {/* Se zoom < 16, mostra código (T14). Se >= 16, mostra nome completo */}
+                        <span className="label-nome">
+                            {zoomLevel < 16 ? codigoTerritorio : nome}
+                        </span>
+
+                        {/* Detalhes (Status/Tempo) aparecem apenas no Zoom 16+ */}
+                        {zoomLevel >= 16 && podeVerDetalhes && (
                             <>
                                 {!isOcupado && !isCompleto && (<><span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca feito"}</span><span className="label-tempo">{textoTempo}</span></>)}
                                 {isOcupado && (<span className="label-status" style={{ color: '#666' }}>Ocupado</span>)}
@@ -683,7 +695,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 )}
             </Polygon>
 
-            {/* RENDERIZAÇÃO DAS QUADRAS (WORK POINTS) */}
+            {/* RENDERIZAÇÃO DAS QUADRAS (WORK POINTS) - APENAS ZOOM 17+ */}
             {deveMostrarQuadras && listaQuadras.map(quadra => (
                 <QuadraMarker
                     key={quadra.id}
@@ -701,8 +713,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
             {/* RENDERIZAÇÃO DE REFERÊNCIAS */}
             {deveMostrarQuadras && showRefs && pontosFiltrados.referencias.map((ref, idx) => (
-                <Marker 
-                    key={`ref-${idx}`} 
+                <Marker
+                    key={`ref-${idx}`}
                     position={[ref.lat, ref.lng]}
                     icon={L.divIcon({ className: 'bg-transparent', html: `<div class="text-xl drop-shadow-sm transform hover:scale-125 transition-transform cursor-help">📍</div>`, iconAnchor: [12, 12] })}
                 >
@@ -710,7 +722,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     <Popup>
                         <div className="flex flex-col items-center gap-2 p-1 min-w-[150px]">
                             <h3 className="font-bold text-gray-800 text-sm">{ref.nome}</h3>
-                            <button 
+                            <button
                                 onClick={() => {
                                     // ATUALIZADO: Abre WhatsApp com link do Maps, igual ao Ponto de Encontro
                                     const linkGoogle = `http://googleusercontent.com/maps.google.com/?q=${ref.lat},${ref.lng}`;
@@ -733,16 +745,16 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 const temNotaCondo = dadosBanco.notas_quadras && dadosBanco.notas_quadras[c.nome] && (Array.isArray(dadosBanco.notas_quadras[c.nome]) ? dadosBanco.notas_quadras[c.nome].length > 0 : dadosBanco.notas_quadras[c.nome] !== "");
 
                 return (
-                    <Marker 
-                        key={`cdo-${idx}`} 
+                    <Marker
+                        key={`cdo-${idx}`}
                         position={[c.lat, c.lng]}
-                        icon={L.divIcon({ 
-                            className: 'bg-transparent', 
+                        icon={L.divIcon({
+                            className: 'bg-transparent',
                             html: `<div class="relative group">
                                     <div class="text-xl drop-shadow-sm transform hover:scale-125 transition-transform cursor-help">🏢</div>
                                     ${temNotaCondo ? '<span class="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 border-2 border-white rounded-full shadow-sm z-50"></span>' : ''}
-                                   </div>`, 
-                            iconAnchor: [12, 12] 
+                                   </div>`,
+                            iconAnchor: [12, 12]
                         })}
                         eventHandlers={{
                             click: (e) => {
@@ -778,7 +790,7 @@ const Mapa = ({ user, isAdmin }) => {
     const [posicaoUsuario, setPosicaoUsuario] = useState(null);
     const [tipoMapa, setTipoMapa] = useState('google');
     const [ocultarCores, setOcultarCores] = useState(false);
-    
+
     // --- ESTADOS DAS CAMADAS ---
     const [showRefs, setShowRefs] = useState(true);
     const [showCondos, setShowCondos] = useState(true);
@@ -815,8 +827,8 @@ const Mapa = ({ user, isAdmin }) => {
                     {tipoMapa === 'google' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
                     {tipoMapa === 'satelite' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
 
-                    <SeletorCamadas 
-                        tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} 
+                    <SeletorCamadas
+                        tipoMapa={tipoMapa} setTipoMapa={setTipoMapa}
                         showRefs={showRefs} setShowRefs={setShowRefs}
                         showCondos={showCondos} setShowCondos={setShowCondos}
                     />

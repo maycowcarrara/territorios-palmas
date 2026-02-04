@@ -20,128 +20,147 @@ const Relatorios = () => {
 
     useEffect(() => {
         const carregarDados = async () => {
-            const querySnapshot = await getDocs(collection(db, "territorios"));
-            const lista = querySnapshot.docs.map(doc => {
-                const data = doc.data();
+            try {
+                // 1. Busca dados do Firebase
+                const querySnapshot = await getDocs(collection(db, "territorios"));
+                
+                // 2. Busca dados do GeoJSON (mapa.json) para calcular os bounds (zoom)
+                const responseMap = await fetch('./mapa.json');
+                const geoData = await responseMap.json();
 
-                let diasParado = 0;
-                let dataUltimaStr = '-';
-                let dataUltimaObj = null;
+                const lista = querySnapshot.docs.map(doc => {
+                    const data = doc.data();
+                    const numeroId = parseInt(doc.id.replace('t_', '')) || 0;
 
-                if (data.ultimaConclusao) {
-                    dataUltimaObj = data.ultimaConclusao.toDate ? data.ultimaConclusao.toDate() : new Date(data.ultimaConclusao);
-                    diasParado = Math.ceil(Math.abs(new Date() - dataUltimaObj) / (1000 * 60 * 60 * 24));
-                    dataUltimaStr = dataUltimaObj.toLocaleDateString('pt-BR');
-                }
-
-                let diasComDirigente = 0;
-                let dataDesigStr = '-';
-                let dataDesigObj = null;
-
-                if (data.designadoPara && data.dataDesignacao) {
-                    dataDesigObj = data.dataDesignacao.toDate ? data.dataDesignacao.toDate() : new Date(data.dataDesignacao);
-                    diasComDirigente = Math.ceil(Math.abs(new Date() - dataDesigObj) / (1000 * 60 * 60 * 24));
-                    dataDesigStr = dataDesigObj.toLocaleDateString('pt-BR');
-                }
-
-                // --- NOVA LÓGICA DE HISTÓRICO (CICLOS) ---
-                let historicoProcessado = [];
-                if (data.historico && Array.isArray(data.historico)) {
-                    historicoProcessado = data.historico.map(h => {
-                        // Data de Início (Tenta pegar dataInicio do ciclo, senão dataRetirada antiga)
-                        const inicio = h.dataInicio?.toDate ? h.dataInicio.toDate() : (h.dataRetirada?.toDate ? h.dataRetirada.toDate() : new Date());
-
-                        // Data de Término (Tenta pegar dataTermino do ciclo, senão dataDevolucao antiga)
-                        const fim = h.dataTermino?.toDate ? h.dataTermino.toDate() : (h.dataDevolucao?.toDate ? h.dataDevolucao.toDate() : new Date());
-
-                        const inicioStr = !isNaN(inicio) ? inicio.toLocaleDateString('pt-BR') : '?';
-                        const fimStr = !isNaN(fim) ? fim.toLocaleDateString('pt-BR') : '?';
-
-                        // Nomes dos Responsáveis (Pode ser Array novo ou String antiga)
-                        let listaNomes = "";
-                        if (Array.isArray(h.responsaveis)) {
-                            listaNomes = h.responsaveis.join(", ");
-                        } else {
-                            listaNomes = h.responsavel || "Desconhecido"; // Fallback
-                        }
-
-                        return {
-                            nomes: listaNomes,
-                            inicio: inicioStr,
-                            termino: fimStr,
-                            timestampFim: fim
-                        };
+                    // --- LÓGICA DE CÁLCULO DE BOUNDS PARA DEEP LINK ---
+                    const feature = geoData.features.find(f => {
+                        const fId = f.properties.id || (geoData.features.indexOf(f) + 1);
+                        return fId === numeroId;
                     });
 
-                    // Ordena pelo término mais recente
-                    historicoProcessado.sort((a, b) => b.timestampFim - a.timestampFim);
-                    historicoProcessado = historicoProcessado.slice(0, 10); // Limita aos últimos 10
-                }
+                    let boundsStr = null;
+                    if (feature && feature.geometry) {
+                        const coords = feature.geometry.type === 'MultiPolygon' 
+                            ? feature.geometry.coordinates.flat(2) 
+                            : feature.geometry.coordinates[0]; 
+                        
+                        if (coords) {
+                            let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+                            coords.forEach(p => {
+                                const lng = p[0];
+                                const lat = p[1];
+                                if (lat < minLat) minLat = lat;
+                                if (lat > maxLat) maxLat = lat;
+                                if (lng < minLng) minLng = lng;
+                                if (lng > maxLng) maxLng = lng;
+                            });
+                            boundsStr = `${minLat},${minLng},${maxLat},${maxLng}`;
+                        }
+                    }
 
-                const nomeSeguro = data.nome || `Território ${doc.id}`;
-                const numeroId = parseInt(doc.id.replace('t_', '')) || 0;
+                    // --- LÓGICA DE DATAS ---
+                    let diasParado = 0;
+                    let dataUltimaStr = '-';
+                    let dataUltimaObj = null;
 
-                return {
-                    id: doc.id,
-                    numeroId,
-                    ...data,
-                    nome: nomeSeguro,
-                    diasParado,
-                    diasComDirigente,
-                    dataUltimaStr,
-                    dataUltimaObj,
-                    dataDesigStr,
-                    dataDesigObj,
-                    historicoLista: historicoProcessado,
-                    status: data.designadoPara ? 'ocupado' : 'livre'
-                };
-            });
+                    if (data.ultimaConclusao) {
+                        dataUltimaObj = data.ultimaConclusao.toDate ? data.ultimaConclusao.toDate() : new Date(data.ultimaConclusao);
+                        diasParado = Math.ceil(Math.abs(new Date() - dataUltimaObj) / (1000 * 60 * 60 * 24));
+                        dataUltimaStr = dataUltimaObj.toLocaleDateString('pt-BR');
+                    }
 
-            setTerritorios(lista);
-            setLoading(false);
+                    let diasComDirigente = 0;
+                    let dataDesigStr = '-';
+                    let dataDesigObj = null;
+
+                    if (data.designadoPara && data.dataDesignacao) {
+                        dataDesigObj = data.dataDesignacao.toDate ? data.dataDesignacao.toDate() : new Date(data.dataDesignacao);
+                        diasComDirigente = Math.ceil(Math.abs(new Date() - dataDesigObj) / (1000 * 60 * 60 * 24));
+                        dataDesigStr = dataDesigObj.toLocaleDateString('pt-BR');
+                    }
+
+                    // --- LÓGICA DE HISTÓRICO ---
+                    let historicoProcessado = [];
+                    if (data.historico && Array.isArray(data.historico)) {
+                        historicoProcessado = data.historico.map(h => {
+                            const inicio = h.dataInicio?.toDate ? h.dataInicio.toDate() : (h.dataRetirada?.toDate ? h.dataRetirada.toDate() : new Date());
+                            const fim = h.dataTermino?.toDate ? h.dataTermino.toDate() : (h.dataDevolucao?.toDate ? h.dataDevolucao.toDate() : new Date());
+
+                            const inicioStr = !isNaN(inicio) ? inicio.toLocaleDateString('pt-BR') : '?';
+                            const fimStr = !isNaN(fim) ? fim.toLocaleDateString('pt-BR') : '?';
+
+                            let listaNomes = "";
+                            if (Array.isArray(h.responsaveis)) {
+                                listaNomes = h.responsaveis.join(", ");
+                            } else {
+                                listaNomes = h.responsavel || "Desconhecido";
+                            }
+
+                            return {
+                                nomes: listaNomes,
+                                inicio: inicioStr,
+                                termino: fimStr,
+                                timestampFim: fim
+                            };
+                        });
+                        historicoProcessado.sort((a, b) => b.timestampFim - a.timestampFim);
+                        historicoProcessado = historicoProcessado.slice(0, 10);
+                    }
+
+                    const nomeSeguro = data.nome || `Território ${doc.id}`;
+
+                    return {
+                        id: doc.id,
+                        numeroId,
+                        ...data,
+                        nome: nomeSeguro,
+                        diasParado,
+                        diasComDirigente,
+                        dataUltimaStr,
+                        dataUltimaObj,
+                        dataDesigStr,
+                        dataDesigObj,
+                        historicoLista: historicoProcessado,
+                        status: data.designadoPara ? 'ocupado' : 'livre',
+                        boundsStr
+                    };
+                });
+
+                setTerritorios(lista);
+                setLoading(false);
+            } catch (error) {
+                console.error("Erro ao carregar dados:", error);
+                setLoading(false);
+            }
         };
 
         carregarDados();
     }, []);
 
-    // --- FUNÇÃO DE FORMATAÇÃO DE TEMPO AMIGÁVEL ---
     const formatarTempo = (dias) => {
         if (dias === 0) return "Hoje";
         if (dias < 30) return `${dias} dias`;
-
         const meses = Math.floor(dias / 30);
         const restoDias = dias % 30;
-
         let texto = `${meses} ${meses > 1 ? 'meses' : 'mês'}`;
-        if (restoDias > 0) {
-            texto += ` e ${restoDias} ${restoDias > 1 ? 'dias' : 'dia'}`;
-        }
+        if (restoDias > 0) texto += ` e ${restoDias} ${restoDias > 1 ? 'dias' : 'dia'}`;
         return texto;
     };
 
-    // --- FUNÇÕES DE EXPANSÃO ---
     const toggleLinha = (id) => {
         setLinhasExpandidas(prev => {
-            if (prev.includes(id)) {
-                return prev.filter(item => item !== id);
-            } else {
-                return [...prev, id];
-            }
+            if (prev.includes(id)) return prev.filter(item => item !== id);
+            else return [...prev, id];
         });
     };
 
     const toggleTodas = () => {
         const todosVisiveisIds = dadosProcessados.map(t => t.id);
         const todasAbertas = todosVisiveisIds.every(id => linhasExpandidas.includes(id));
-
-        if (todasAbertas) {
-            setLinhasExpandidas([]);
-        } else {
-            setLinhasExpandidas(todosVisiveisIds);
-        }
+        if (todasAbertas) setLinhasExpandidas([]);
+        else setLinhasExpandidas(todosVisiveisIds);
     };
 
-    // --- FILTROS E LÓGICA ---
     const limparFiltros = () => {
         setBusca('');
         setStatusFiltro('todos');
@@ -154,16 +173,12 @@ const Relatorios = () => {
         limparFiltros();
         if (tipo === 'livre') setStatusFiltro('livre');
         if (tipo === 'ocupado') setStatusFiltro('ocupado');
-        if (tipo === 'criticos') setTempoFiltro('4_meses'); // Atalho para +4 meses
+        if (tipo === 'criticos') setTempoFiltro('4_meses');
     };
 
     const dadosProcessados = useMemo(() => {
         let dados = [...territorios];
-
-        // Filtro de Status
         if (statusFiltro !== 'todos') dados = dados.filter(t => t.status === statusFiltro);
-
-        // Filtro de Tempo (Novas opções)
         if (tempoFiltro === '2_meses') dados = dados.filter(t => t.diasParado > 60);
         if (tempoFiltro === '4_meses') dados = dados.filter(t => t.diasParado > 120);
         if (tempoFiltro === '6_meses') dados = dados.filter(t => t.diasParado > 180);
@@ -203,7 +218,6 @@ const Relatorios = () => {
         return sortConfig.direction === 'asc' ? <span className="text-blue-600 ml-1 text-[10px]">▲</span> : <span className="text-blue-600 ml-1 text-[10px]">▼</span>;
     };
 
-    // Estatísticas Gerais (Sempre calculadas sobre o total)
     const total = territorios.length;
     const ocupados = territorios.filter(t => t.status === 'ocupado').length;
     const livres = total - ocupados;
@@ -220,6 +234,10 @@ const Relatorios = () => {
     // --- PDF ---
     const exportarPDF = () => {
         const doc = new jsPDF();
+        
+        // Pega a URL base correta (remove hash se existir para montar limpo)
+        const baseUrl = window.location.href.split('#')[0];
+
         doc.setFontSize(18);
         doc.text("Relatório de Territórios", 14, 20);
         doc.setFontSize(10);
@@ -228,7 +246,6 @@ const Relatorios = () => {
         doc.setFontSize(8);
         doc.setTextColor(100);
 
-        // Texto descritivo do filtro de tempo para o PDF
         let textoTempoFiltro = "Todos";
         if (tempoFiltro === '2_meses') textoTempoFiltro = "+2 Meses";
         if (tempoFiltro === '4_meses') textoTempoFiltro = "+4 Meses";
@@ -244,7 +261,6 @@ const Relatorios = () => {
             let textoHistorico = "";
 
             if (t.status === 'ocupado') {
-                // Se tiver ciclo atual acumulado (array), junta os nomes. Senão usa o nome único.
                 let atuais = t.designadoNome;
                 if (t.cicloAtual && Array.isArray(t.cicloAtual.responsaveis)) {
                     atuais = t.cicloAtual.responsaveis.join(", ");
@@ -257,21 +273,21 @@ const Relatorios = () => {
             if (t.historicoLista && t.historicoLista.length > 0) {
                 textoHistorico += "-- HISTÓRICO --\n";
                 t.historicoLista.forEach(h => {
-                    // FORMATO SOLICITADO:
-                    // Início: DATA - Dirigentes: Nomes - Término: DATA
                     textoHistorico += `• Início: ${h.inicio} - Dirigentes: ${h.nomes} - Término: ${h.termino}\n`;
                 });
             } else {
                 textoHistorico += "\n(Sem histórico)";
             }
 
+            // Apenas define a cor azul se tiver link, mas a ação do clique é feita no didDrawCell
+            const hasLink = !!t.boundsStr;
+
             const dadosLinha = [
                 t.numeroId,
-                t.nome,
+                { content: t.nome, styles: { textColor: hasLink ? [0, 0, 255] : [0, 0, 0] } },
                 t.status === 'ocupado' ? 'Ocupado' : 'Livre',
                 textoHistorico,
                 t.dataUltimaStr,
-                // Usando a nova formatação também no PDF
                 t.diasParado > 0 ? formatarTempo(t.diasParado) : 'Nunca'
             ];
             tableRows.push(dadosLinha);
@@ -282,10 +298,22 @@ const Relatorios = () => {
             body: tableRows,
             startY: 35,
             theme: 'grid',
-            styles: { fontSize: 8, cellPadding: 2, valign: 'top' }, // valign top para ficar alinhado ao topo
+            styles: { fontSize: 8, cellPadding: 2, valign: 'top' },
             headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255] },
             columnStyles: {
-                3: { cellWidth: 95 } // Coluna de histórico bem larga
+                3: { cellWidth: 95 }
+            },
+            // --- CORREÇÃO: ADICIONANDO O LINK MANUALMENTE APÓS DESENHAR A CÉLULA ---
+            didDrawCell: (data) => {
+                // Se for a coluna do NOME (index 1) e estiver no corpo da tabela
+                if (data.section === 'body' && data.column.index === 1) {
+                    const t = dadosProcessados[data.row.index];
+                    if (t && t.boundsStr) {
+                        const deepLink = `${baseUrl}#/app?bounds=${t.boundsStr}`;
+                        // Cria uma área clicável invisível sobre a célula
+                        doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: deepLink });
+                    }
+                }
             }
         });
 
@@ -398,7 +426,22 @@ const Relatorios = () => {
                                                     : <span className="opacity-20">●</span>}
                                             </td>
                                             <td className="px-4 py-3 text-xs font-mono text-slate-400 font-bold">{t.numeroId}</td>
-                                            <td className="px-4 py-3 font-bold text-slate-700">{t.nome}</td>
+                                            
+                                            {/* NOME: LINK NA WEB (HTML) */}
+                                            <td className="px-4 py-3 font-bold text-slate-700">
+                                                {t.boundsStr ? (
+                                                    <Link 
+                                                        to={`/app?bounds=${t.boundsStr}`} 
+                                                        className="text-blue-600 hover:underline hover:text-blue-800 transition-colors"
+                                                        onClick={(e) => e.stopPropagation()} 
+                                                    >
+                                                        {t.nome}
+                                                    </Link>
+                                                ) : (
+                                                    t.nome
+                                                )}
+                                            </td>
+                                            
                                             <td className="px-4 py-3">
                                                 {t.status === 'ocupado' ?
                                                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 uppercase">Ocupado</span> :
