@@ -1,7 +1,5 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getMessaging } from "firebase/messaging";
-// 1. Adicione os novos imports aqui:
 import {
     getFirestore,
     initializeFirestore,
@@ -23,13 +21,9 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// 2. Substitua a linha antiga "export const db = getFirestore(app);" por esta configuração:
+// Mantemos essa configuração de cache pois ela ajuda o app a não travar
 export const db = initializeFirestore(app, {
     localCache: persistentLocalCache({
-        // Isso permite que múltiplas abas funcionem sem travar o banco offline
         tabManager: persistentMultipleTabManager()
     })
 });
-
-const messaging = getMessaging(app);
-export { messaging };
