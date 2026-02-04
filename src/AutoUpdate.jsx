@@ -1,13 +1,12 @@
 import React, { useEffect } from 'react';
-import appInfo from './version.json'; // Importa a versão local (do build)
+import appInfo from './version.json';
 
 const AutoUpdate = () => {
     useEffect(() => {
-        // Função para destruir o cache e forçar atualização
         const limparCacheERecarregar = async () => {
             console.log("🔄 Nova versão detectada! Atualizando...");
 
-            // 1. Remove Service Workers antigos (PWA)
+            // 1. Remove Service Workers antigos (Essencial para garantir que o novo index.html seja baixado)
             if ('serviceWorker' in navigator) {
                 const registrations = await navigator.serviceWorker.getRegistrations();
                 for (const registration of registrations) {
@@ -15,29 +14,27 @@ const AutoUpdate = () => {
                 }
             }
 
-            // 2. Limpa o Cache Storage (onde o PWA guarda arquivos)
-            if ('caches' in window) {
-                const keys = await caches.keys();
-                await Promise.all(keys.map(key => caches.delete(key)));
-            }
+            // REMOVIDO: O passo de limpar 'caches.keys()' manualmente.
+            // O Vite gera arquivos com hash (ex: index-a1b2.js). Ao recarregar,
+            // o navegador baixa os novos e ignora os velhos automaticamente.
+            // Isso torna o reload muito mais rápido.
 
-            // 3. Força recarregamento da página (true = ignora cache do browser)
+            // 2. Força recarregamento da página buscando do servidor
             window.location.reload(true);
         };
 
         const verificarVersao = async () => {
             try {
-                // PEQUENA MELHORIA: Usar BASE_URL do Vite
-                // Isso garante que o fetch pegue '/territorios-palmas/version.json' no GitHub
-                // e '/version.json' no localhost automaticamente.
                 const baseUrl = import.meta.env.BASE_URL;
-                const response = await fetch(`${baseUrl}version.json?t=${new Date().getTime()}`);
+                // Adiciona um timestamp para evitar cache na requisição do JSON
+                const response = await fetch(`${baseUrl}version.json?t=${new Date().getTime()}`, {
+                    cache: 'no-store'
+                });
 
                 if (!response.ok) return;
 
                 const data = await response.json();
 
-                // Compara a versão do servidor com a versão que está rodando
                 if (data.version !== appInfo.version) {
                     await limparCacheERecarregar();
                 }
@@ -46,16 +43,14 @@ const AutoUpdate = () => {
             }
         };
 
-        // Verifica assim que o componente monta
         verificarVersao();
-
-        // Verifica periodicamente (a cada 60s)
-        const intervalo = setInterval(verificarVersao, 60 * 1000);
+        // Verifica a cada 30 segundos (reduzi de 60s para ficar mais ágil)
+        const intervalo = setInterval(verificarVersao, 30 * 1000);
 
         return () => clearInterval(intervalo);
     }, []);
 
-    return null; // Componente invisível (lógica pura)
+    return null;
 };
 
 export default AutoUpdate;

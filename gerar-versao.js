@@ -1,47 +1,46 @@
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+import path from 'path';
 
-// Caminho para o package.json
-const packageJsonPath = './package.json';
+// Configuração para ES Modules (já que seu projeto usa "type": "module")
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// 1. Ler o package.json atual
-const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+// Lê o package.json para pegar a versão oficial que você editou manualmente
+const packagePath = path.join(__dirname, 'package.json');
+const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+const novaVersao = packageJson.version;
 
-// 2. Lógica para incrementar a versão (Patch)
-const versaoAtual = packageJson.version; // Ex: "1.2.32"
-const partes = versaoAtual.split('.'); // Vira ["1", "2", "32"]
+console.log(`📌 Versão detectada no package.json: ${novaVersao}`);
 
-// Pega o último número, soma 1 e garante que é um número inteiro
-const novoPatch = parseInt(partes[2]) + 1;
-
-// Remonta a versão (Ex: "1.2.33")
-partes[2] = novoPatch;
-const novaVersao = partes.join('.');
-
-// 3. Atualiza o objeto do package.json e salva no disco
-packageJson.version = novaVersao;
-fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-
-// 4. Gera a data de build
-const date = new Date();
-const buildDate = `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')} às ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-
-// 5. Cria o objeto com as informações
-const versionInfo = {
+// Dados para salvar
+const dadosVersao = {
     version: novaVersao,
-    buildDate: buildDate
+    buildDate: new Date().toLocaleString('pt-BR', { 
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' 
+    })
 };
 
-// --- AQUI ESTÁ A ATUALIZAÇÃO ---
+const conteudoJson = JSON.stringify(dadosVersao, null, 2);
 
-// Salva na pasta SRC (Para o React usar internamente no Menu/Rodapé)
-fs.writeFileSync('./src/version.json', JSON.stringify(versionInfo, null, 2));
+// Caminhos onde o arquivo deve ser salvo
+const caminhos = [
+    path.join(__dirname, 'src', 'version.json'),    // Usado pelo Import do React
+    path.join(__dirname, 'public', 'version.json')  // Usado pelo Fetch (online)
+];
 
-// Salva na pasta PUBLIC (Para o AutoUpdate conseguir baixar e checar se mudou)
-if (!fs.existsSync('./public')) {
-    fs.mkdirSync('./public');
-}
-fs.writeFileSync('./public/version.json', JSON.stringify(versionInfo, null, 2));
+// Salva nos dois lugares
+caminhos.forEach(caminho => {
+    try {
+        // Garante que a pasta existe (caso public ou src não existam, o que é raro)
+        const dir = path.dirname(caminho);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-console.log(`🚀 Versão atualizada: ${versaoAtual} -> ${novaVersao}`);
-console.log(`📅 Build: ${buildDate}`);
-console.log(`📂 Arquivos de versão gerados em /src e /public`);
+        fs.writeFileSync(caminho, conteudoJson);
+        console.log(`✅ Atualizado: ${caminho}`);
+    } catch (erro) {
+        console.error(`❌ Erro ao salvar em ${caminho}:`, erro);
+    }
+});
+
+console.log(`🚀 Versão ${novaVersao} sincronizada com sucesso!`);

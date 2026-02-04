@@ -8,7 +8,8 @@ import L from 'leaflet';
 // --- CSS ---
 const cssTooltip = `
   .label-territorio { background: transparent; border: none; box-shadow: none; font-family: 'Bahnschrift', sans-serif-condensed, sans-serif; text-align: center; line-height: 1.1; pointer-events: none; }
-  .label-nome { font-weight: 700; font-size: 14px; color: #1e3a8a; text-shadow: 2px 0 #fff, -2px 0 #fff, 0 2px #fff, 0 -2px #fff, 1px 1px #fff, -1px -1px #fff; display: block; font-stretch: condensed; letter-spacing: -0.5px; margin-bottom: 2px; }
+  /* ATUALIZADO: max-width e white-space para quebrar linhas em nomes grandes */
+  .label-nome { font-weight: 700; font-size: 14px; color: #1e3a8a; text-shadow: 2px 0 #fff, -2px 0 #fff, 0 2px #fff, 0 -2px #fff, 1px 1px #fff, -1px -1px #fff; display: block; font-stretch: condensed; letter-spacing: -0.5px; margin-bottom: 2px; white-space: normal; max-width: 140px; margin-left: auto; margin-right: auto; }
   .label-status { font-size: 11px; font-weight: 700; color: #444; text-shadow: 1px 1px 0px rgba(255,255,255,0.9); background-color: rgba(255,255,255,0.7); padding: 1px 6px; border-radius: 8px; display: inline-block; }
   .label-tempo { display: block; font-size: 10px; font-weight: 800; color: #7f1d1d; margin-top: 2px; text-shadow: 1px 1px 0px rgba(255,255,255,0.8); text-transform: uppercase; }
   .sem-fundo { background: transparent; border: none; box-shadow: none; }
@@ -93,7 +94,7 @@ const DeepLinkHandler = () => {
 
 // --- COMPONENTES DE UI ---
 
-// [ATUALIZADO] Seletor de Camadas com novos botões
+// Seletor de Camadas
 const SeletorCamadas = ({ tipoMapa, setTipoMapa, showRefs, setShowRefs, showCondos, setShowCondos }) => {
     const alternarCamada = () => {
         if (tipoMapa === 'google') setTipoMapa('satelite');
@@ -194,7 +195,7 @@ const MarcadorUsuario = ({ posicao }) => {
     if (!posicao) return null;
 
     const compartilharLocalizacao = () => {
-        const linkGoogle = `https://www.google.com/maps?q=${posicao.lat},${posicao.lng}`;
+        const linkGoogle = `http://googleusercontent.com/maps.google.com/?q=${posicao.lat},${posicao.lng}`;
         const textoEncoded = encodeURIComponent(`*Estou aqui:*\n\n${linkGoogle}`);
         window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
     };
@@ -268,7 +269,7 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col h-[500px]">
                 <div className="bg-blue-600 p-4 flex justify-between items-center shrink-0">
                     <h3 className="text-white font-bold text-lg flex items-center gap-2">
-                        💬 Notas da Quadra {dados?.quadraId}
+                        💬 Notas: {dados?.quadraId}
                     </h3>
                     <button onClick={onClose} className="text-white/80 hover:text-white text-xl font-bold">×</button>
                 </div>
@@ -575,7 +576,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     const compartilharPontoEncontro = () => {
         const ponto = posicaoClique || centro;
-        const linkGoogle = `https://www.google.com/maps?q=${ponto.lat},${ponto.lng}`;
+        const linkGoogle = `http://googleusercontent.com/maps.google.com/?q=${ponto.lat},${ponto.lng}`;
         const texto = `*Ponto de Encontro* para o território *${nome}*:\n\n${linkGoogle}`;
         const textoEncoded = encodeURIComponent(texto);
         window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
@@ -596,7 +597,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 <Popup>
                     <div className="min-w-[260px] p-1 font-sans">
                         <div className="border-b border-gray-200 pb-2 mb-2 text-center">
-                            <strong className="text-lg font-bold text-gray-800 block">{nome}</strong>
+                            {/* ATUALIZADO: break-words e leading-tight para nomes grandes */}
+                            <strong className="text-lg font-bold text-gray-800 block break-words leading-tight">{nome}</strong>
                             {dadosBanco.ultimaConclusao && <span className="text-[10px] text-gray-500 uppercase">Última vez: {textoTempo} atrás</span>}
                         </div>
                         <div className="mb-3">
@@ -705,19 +707,54 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     icon={L.divIcon({ className: 'bg-transparent', html: `<div class="text-xl drop-shadow-sm transform hover:scale-125 transition-transform cursor-help">📍</div>`, iconAnchor: [12, 12] })}
                 >
                     <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs">{ref.nome}</Tooltip>
+                    <Popup>
+                        <div className="flex flex-col items-center gap-2 p-1 min-w-[150px]">
+                            <h3 className="font-bold text-gray-800 text-sm">{ref.nome}</h3>
+                            <button 
+                                onClick={() => {
+                                    // ATUALIZADO: Abre WhatsApp com link do Maps, igual ao Ponto de Encontro
+                                    const linkGoogle = `http://googleusercontent.com/maps.google.com/?q=${ref.lat},${ref.lng}`;
+                                    const texto = `*Ponto de Referência:* ${ref.nome}\n\n${linkGoogle}`;
+                                    const textoEncoded = encodeURIComponent(texto);
+                                    window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
+                                }}
+                                className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1 hover:bg-blue-700 transition-colors w-full justify-center shadow-sm"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                                Compartilhar
+                            </button>
+                        </div>
+                    </Popup>
                 </Marker>
             ))}
 
             {/* RENDERIZAÇÃO DE CONDOMÍNIOS */}
-            {deveMostrarQuadras && showCondos && pontosFiltrados.condominios.map((c, idx) => (
-                <Marker 
-                    key={`cdo-${idx}`} 
-                    position={[c.lat, c.lng]}
-                    icon={L.divIcon({ className: 'bg-transparent', html: `<div class="text-xl drop-shadow-sm transform hover:scale-125 transition-transform cursor-help">🏢</div>`, iconAnchor: [12, 12] })}
-                >
-                    <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs text-blue-800">{c.nome}</Tooltip>
-                </Marker>
-            ))}
+            {deveMostrarQuadras && showCondos && pontosFiltrados.condominios.map((c, idx) => {
+                const temNotaCondo = dadosBanco.notas_quadras && dadosBanco.notas_quadras[c.nome] && (Array.isArray(dadosBanco.notas_quadras[c.nome]) ? dadosBanco.notas_quadras[c.nome].length > 0 : dadosBanco.notas_quadras[c.nome] !== "");
+
+                return (
+                    <Marker 
+                        key={`cdo-${idx}`} 
+                        position={[c.lat, c.lng]}
+                        icon={L.divIcon({ 
+                            className: 'bg-transparent', 
+                            html: `<div class="relative group">
+                                    <div class="text-xl drop-shadow-sm transform hover:scale-125 transition-transform cursor-help">🏢</div>
+                                    ${temNotaCondo ? '<span class="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 border-2 border-white rounded-full shadow-sm z-50"></span>' : ''}
+                                   </div>`, 
+                            iconAnchor: [12, 12] 
+                        })}
+                        eventHandlers={{
+                            click: (e) => {
+                                L.DomEvent.stopPropagation(e);
+                                abrirModalNota(c.nome, dadosBanco.notas_quadras ? dadosBanco.notas_quadras[c.nome] : '');
+                            }
+                        }}
+                    >
+                        <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs text-blue-800">{c.nome}</Tooltip>
+                    </Marker>
+                );
+            })}
 
             <ModalNota
                 isOpen={modalConfig.open}
