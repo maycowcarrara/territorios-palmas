@@ -8,7 +8,7 @@ import { useUsuario } from './useUsuario';
 import AdminPanel from './AdminPanel';
 import Relatorios from './Relatorios';
 import appInfo from './version.json';
-import AutoUpdate from './AutoUpdate';
+import AutoUpdate, { checkForUpdate } from './AutoUpdate';
 import AjudaModal from './AjudaModal';
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
@@ -340,8 +340,7 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
   );
 };
 
-// --- MENU LATERAL (ATUALIZADO) ---
-// --- MENU LATERAL (ATUALIZADO - ÍCONE LEGENDA CORRIGIDO) ---
+// --- MENU LATERAL (ATUALIZADO - ORDEM REAJUSTADA) ---
 const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda }) => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
@@ -404,37 +403,17 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
         {/* CORPO DO MENU */}
         <div className="p-4 flex flex-col gap-2 flex-1 overflow-y-auto">
 
-          {/* BOTÃO MAPA */}
-          <button onClick={() => { navigate('/app'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 text-blue-700 font-medium">
+          {/* 1. MAPA */}
+          <button onClick={() => { navigate('/app'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 text-blue-700 font-medium border border-blue-100">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
             </svg>
             Mapa
           </button>
 
-          <button onClick={() => { abrirLegenda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors font-medium">
-            {/* ÍCONE NOVO: LISTA/LEGENDA (CORRIGIDO) */}
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-            </svg>
-            Legenda do Mapa
-          </button>
-
-          <button onClick={() => { abrirAjuda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-yellow-50 text-yellow-700 transition-colors font-medium">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-            Como usar (Ajuda)
-          </button>
-
+          {/* 2 & 3. ITENS DE ADMIN */}
           {isAdmin && (
             <>
-              <button onClick={() => { navigate('/admin'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                </svg>
-                Gerenciar Usuários
-              </button>
               <button onClick={() => { navigate('/relatorios'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
@@ -442,9 +421,33 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
                 </svg>
                 Relatórios
               </button>
+
+              <button onClick={() => { navigate('/admin'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                </svg>
+                Gerenciar Usuários
+              </button>
             </>
           )}
 
+          {/* 4. LEGENDA */}
+          <button onClick={() => { abrirLegenda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+            </svg>
+            Legenda do Mapa
+          </button>
+
+          {/* 5. COMO USAR */}
+          <button onClick={() => { abrirAjuda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-yellow-50 text-yellow-700 transition-colors font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            Como usar (Ajuda)
+          </button>
+
+          {/* 6. INSTALAR */}
           {!isStandalone && (
             <button onClick={instalarApp} className="flex items-center gap-3 p-3 rounded-lg hover:bg-green-50 text-green-700 transition-colors font-medium border border-dashed border-green-200 mt-2">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -456,6 +459,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
 
           <div className="h-px bg-gray-100 my-2"></div>
 
+          {/* 7. SAIR */}
           <button onClick={handleLogout} className="flex items-center gap-3 p-3 rounded-lg hover:bg-red-50 text-red-600 transition-colors font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd" />
@@ -464,17 +468,34 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
           </button>
         </div>
 
-        <div className="p-4 text-center text-[10px] text-gray-300 bg-gray-50 border-t border-gray-100 flex-shrink-0">
-          <p>Territórios Digitais v{appInfo.version}</p>
-          <p className="opacity-70">Atualizado em: {appInfo.buildDate}</p>
-          <p className="mt-1">Desenvolvido com carinho ❤️</p>
+        {/* --- RODAPÉ COM BOTÃO DE UPDATE --- */}
+        <div className="p-4 bg-gray-50 border-t border-gray-100 flex-shrink-0 flex flex-col items-center gap-1">
+          <div className="text-[10px] text-gray-400 text-center mb-2">
+            <p className="font-semibold text-gray-500">Territórios Digitais v{appInfo.version}</p>
+            <p className="opacity-70">{appInfo.buildDate}</p>
+          </div>
+
+          <button 
+            onClick={async () => {
+                const temUpdate = await checkForUpdate(true);
+                if (!temUpdate) alert("Seu sistema já está atualizado! ✅");
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-full shadow-sm text-blue-600 text-xs font-bold hover:bg-blue-50 hover:border-blue-200 transition-all active:scale-95"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Verificar Atualização
+          </button>
+          
+          <p className="mt-2 text-[10px] text-gray-300">Desenvolvido com carinho ❤️</p>
         </div>
       </div>
     </>
   );
 };
 
-// --- DASHBOARD ---
+// --- DASHBOARD (ATUALIZADO - HEADER COM ATALHOS) ---
 function Dashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
@@ -566,7 +587,34 @@ function Dashboard() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* ATALHO 1: RELATÓRIOS (SÓ ADMIN) */}
+          {isAdmin && (
+            <button
+              onClick={() => navigate('/relatorios')}
+              className="p-2 text-white/90 hover:text-white hover:bg-blue-500 rounded-full transition-colors relative"
+              title="Relatórios"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+              </svg>
+            </button>
+          )}
+
+          {/* ATALHO 2: AJUDA (QUEM NÃO É ADMIN) */}
+          {!isAdmin && (
+            <button
+              onClick={() => setAjudaAberta(true)}
+              className="p-2 text-white/90 hover:text-white hover:bg-blue-500 rounded-full transition-colors relative"
+              title="Como Usar"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          )}
+
           <SininhoNotificacoes user={user} isAdmin={isAdmin} />
+
           <button
             onClick={() => setMeusTerritoriosAberto(true)}
             className="flex items-center gap-1 px-3 py-1.5 bg-blue-700/80 hover:bg-blue-800 rounded-full shadow-sm text-sm font-semibold transition-colors active:scale-95 border border-blue-500"
@@ -576,6 +624,7 @@ function Dashboard() {
             </svg>
             <span className="text-xs uppercase tracking-wider">Meus</span>
           </button>
+
           <button
             onClick={() => setMenuAberto(true)}
             className="p-1 hover:bg-blue-700 rounded transition-colors ml-1"
@@ -594,7 +643,7 @@ function Dashboard() {
   );
 }
 
-// --- APP PRINCIPAL (CORRIGIDO) ---
+// --- APP PRINCIPAL ---
 function App() {
   const [user, setUser] = useState(null);
 
