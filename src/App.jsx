@@ -495,11 +495,13 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
   );
 };
 
-// --- DASHBOARD (ATUALIZADO - HEADER COM ATALHOS) ---
+// --- DASHBOARD (CORRIGIDO: BOTÕES VISÍVEIS + LOGO NO MOBILE) ---
 function Dashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [verificandoLogin, setVerificandoLogin] = useState(true);
+
+  // Estados dos modais
   const [menuAberto, setMenuAberto] = useState(false);
   const [legendaAberta, setLegendaAberta] = useState(false);
   const [ajudaAberta, setAjudaAberta] = useState(false);
@@ -517,19 +519,20 @@ function Dashboard() {
     return () => unsubscribe();
   }, [navigate]);
 
-  const { isAdmin, autorizado, loading: verificandoBanco } = useUsuario(user);
+  const { isAdmin, autorizado, loading: verificandoBanco, role } = useUsuario(user);
 
   const handleLogout = () => {
     signOut(auth);
     navigate('/');
   };
 
+  // 1. TELA DE CARREGANDO
   if (verificandoLogin || (user && verificandoBanco)) {
     return (
       <div className="h-[100dvh] flex items-center justify-center bg-gray-100">
-        <div className="flex flex-col items-center gap-2">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <span className="text-blue-600 font-semibold text-sm">Carregando sistema...</span>
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+          <span className="text-blue-600 font-semibold text-sm animate-pulse">Carregando sistema...</span>
         </div>
       </div>
     );
@@ -537,18 +540,48 @@ function Dashboard() {
 
   if (!user) return null;
 
+  // 2. TELAS DE BLOQUEIO / PENDÊNCIA
   if (!autorizado) {
+    if (role === 'aguardando') {
+      return (
+        <div className="h-[100dvh] flex items-center justify-center bg-gray-50 p-6">
+          <div className="w-full max-w-md bg-white shadow-xl rounded-2xl p-8 text-center border border-blue-100 animate-fade-in">
+            <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">
+              🕒
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Cadastro em Análise</h2>
+            <p className="text-gray-600 mb-6 leading-relaxed">
+              Olá, <strong>{user.displayName}</strong>! <br />
+              Seu acesso já foi solicitado e notificamos os administradores.
+              <br /><br />
+              <span className="text-sm bg-blue-50 text-blue-700 py-1 px-3 rounded-full">
+                Fique tranquilo, em breve será liberado!
+              </span>
+            </p>
+            <div className="flex flex-col gap-3">
+              <button onClick={() => window.location.reload()} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors shadow-sm">
+                Verificar novamente
+              </button>
+              <button onClick={handleLogout} className="w-full py-3 border border-gray-200 text-gray-500 rounded-xl font-medium hover:bg-gray-50 transition-colors">
+                Sair por enquanto
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="h-[100dvh] flex items-center justify-center bg-gray-100 p-4">
         <div className="w-96 bg-white shadow-xl rounded-xl p-6 text-center border border-red-100">
           <h2 className="text-2xl font-bold text-red-600 mb-2">Acesso Restrito</h2>
-          <p className="mb-6 text-gray-600">O e-mail <strong>{user.email}</strong> não está cadastrado.</p>
+          <p className="mb-6 text-gray-600">O e-mail <strong>{user.email}</strong> não possui permissão de acesso.</p>
           <button onClick={handleLogout} className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 text-gray-700">Sair</button>
         </div>
       </div>
     );
   }
 
+  // 3. TELA PRINCIPAL (DASHBOARD)
   return (
     <div className="h-[100dvh] flex flex-col overflow-hidden relative">
       <MenuLateral
@@ -581,13 +614,25 @@ function Dashboard() {
         navigate={navigate}
       />
 
+      {/* CABEÇALHO */}
       <div className="h-16 bg-blue-600 text-white shadow-md z-20 px-4 flex items-center justify-between flex-shrink-0">
+        
+        {/* LADO ESQUERDO: LOGO (Mobile) vs TÍTULO (Desktop) */}
         <div className="flex items-center gap-3">
-          <span className="text-xl font-bold tracking-wide">Territórios</span>
+          {/* Logo: Visível no mobile (sm:hidden esconde em telas maiores) */}
+          <img 
+            src="./icon-192.png" 
+            alt="Logo" 
+            className="h-9 w-9 rounded-lg shadow-sm border border-blue-400/50 sm:hidden" 
+          />
+          {/* Texto: Visível no desktop (hidden esconde no mobile) */}
+          <span className="text-xl font-bold tracking-wide hidden sm:block">Territórios</span>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* ATALHO 1: RELATÓRIOS (SÓ ADMIN) */}
+        {/* LADO DIREITO: ÍCONES E BOTÕES */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          
+          {/* ATALHO 1: RELATÓRIOS (SÓ ADMIN) - Sempre visível agora */}
           {isAdmin && (
             <button
               onClick={() => navigate('/relatorios')}
@@ -600,7 +645,7 @@ function Dashboard() {
             </button>
           )}
 
-          {/* ATALHO 2: AJUDA (QUEM NÃO É ADMIN) */}
+          {/* ATALHO 2: AJUDA (QUEM NÃO É ADMIN) - Sempre visível agora */}
           {!isAdmin && (
             <button
               onClick={() => setAjudaAberta(true)}

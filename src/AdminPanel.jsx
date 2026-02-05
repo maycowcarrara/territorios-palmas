@@ -13,13 +13,13 @@ const AdminPanel = () => {
     const [loadingAdd, setLoadingAdd] = useState(false);
 
     // Estados para EDIÇÃO inline
-    const [editandoId, setEditandoId] = useState(null); // ID (email original) do usuário em edição
-    const [dadosEditados, setDadosEditados] = useState({}); // Objeto temporário com os dados editados
+    const [editandoId, setEditandoId] = useState(null);
+    const [dadosEditados, setDadosEditados] = useState({});
 
     useEffect(() => {
         const unsub = onSnapshot(collection(db, "usuarios"), (snapshot) => {
             const lista = snapshot.docs.map(doc => ({
-                id: doc.id, // O ID do documento é o email original
+                id: doc.id,
                 ...doc.data()
             }));
             // Ordenar: Pendentes primeiro, depois Admins, depois resto
@@ -40,39 +40,30 @@ const AdminPanel = () => {
         e.preventDefault();
         if (!novoEmail) return;
 
-        // --- 1. VALIDAÇÃO DE E-MAIL ---
-        // Verifica se tem formato de email padrão
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(novoEmail)) {
             alert("❌ E-mail inválido! Por favor, verifique o formato.");
             return;
         }
 
-        // (Opcional) Trava para aceitar apenas Gmail, já que usa Google Auth
         if (!novoEmail.includes('@gmail.com')) {
             alert("❌ Por favor, use um e-mail @gmail.com para compatibilidade com o login.");
             return;
         }
 
-        // --- 2. VALIDAÇÃO DE WHATSAPP ---
-        // Remove tudo que não for número para contar os dígitos
         const whatsLimpo = novoWhats.replace(/\D/g, '');
-
-        // Se o campo não estiver vazio, exige entre 10 e 11 dígitos (DDD + Número)
         if (novoWhats && (whatsLimpo.length < 10 || whatsLimpo.length > 11)) {
             alert("❌ WhatsApp inválido! O número deve ter DDD + 8 ou 9 dígitos.");
             return;
         }
 
         setLoadingAdd(true);
-
         const emailFormatado = novoEmail.trim().toLowerCase();
 
         try {
             await setDoc(doc(db, "usuarios", emailFormatado), {
                 role: 'comum',
                 nome: novoNome || 'Novo Dirigente',
-                // Salva apenas os números no banco para facilitar links do WhatsApp API depois
                 whatsapp: whatsLimpo,
                 criadoEm: new Date()
             });
@@ -87,15 +78,23 @@ const AdminPanel = () => {
         setLoadingAdd(false);
     };
 
-    // --- AÇÕES RÁPIDAS ---
-    const mudarRole = async (email, novaRole) => {
-        try {
-            await updateDoc(doc(db, "usuarios", email), { role: novaRole });
-        } catch (e) { alert("Erro ao mudar permissão."); }
+    // --- AÇÕES RÁPIDAS (ATUALIZADO COM CONFIRMAÇÃO) ---
+    const mudarRole = async (user, novaRole) => {
+        // Define a mensagem baseada na ação
+        const acao = novaRole === 'admin' ? 'PROMOVER a Administrador' : 'REBAIXAR para Dirigente';
+        const alerta = novaRole === 'admin' 
+            ? `⚠️ ATENÇÃO: Você está prestes a tornar ${user.nome || user.id} um ADMINISTRADOR.\n\nEle terá acesso total ao sistema, incluindo edição e exclusão de dados.\n\nDeseja continuar?`
+            : `Deseja remover as permissões de administrador de ${user.nome || user.id}?`;
+
+        if (confirm(alerta)) {
+            try {
+                await updateDoc(doc(db, "usuarios", user.id), { role: novaRole });
+            } catch (e) { alert("Erro ao mudar permissão."); }
+        }
     };
 
     const remover = async (email) => {
-        if (confirm(`Tem certeza que deseja remover ${email}? Essa ação não pode ser desfeita.`)) {
+        if (confirm(`Tem certeza que deseja EXCLUIR DEFINITIVAMENTE o usuário ${email}?\n\nEssa ação não pode ser desfeita.`)) {
             try {
                 await deleteDoc(doc(db, "usuarios", email));
             } catch (e) { alert("Erro ao remover."); }
@@ -105,7 +104,7 @@ const AdminPanel = () => {
     // --- LÓGICA DE EDIÇÃO ---
     const iniciarEdicao = (user) => {
         setEditandoId(user.id);
-        setDadosEditados({ ...user }); // Copia dados atuais para o estado temporário
+        setDadosEditados({ ...user });
     };
 
     const cancelarEdicao = () => {
@@ -117,16 +116,10 @@ const AdminPanel = () => {
         if (!editandoId) return;
 
         try {
-            // Nota: Não dá para mudar o ID do documento (email) direto no Firestore.
-            // Se o email mudou, teríamos que criar um novo doc e apagar o velho.
-            // Por segurança e simplicidade, vamos permitir editar apenas Nome e Whats aqui.
-            // Se precisar mudar email, remove e cria de novo.
-
             await updateDoc(doc(db, "usuarios", editandoId), {
                 nome: dadosEditados.nome,
                 whatsapp: dadosEditados.whatsapp
             });
-
             setEditandoId(null);
         } catch (error) {
             console.error(error);
@@ -144,9 +137,9 @@ const AdminPanel = () => {
     const totalPendentes = usuarios.filter(u => u.role === 'aguardando').length;
     const formatarTelefone = (valor) => {
         return valor
-            .replace(/\D/g, '') // Remove letras
-            .replace(/^(\d{2})(\d)/g, '($1) $2') // Põe parênteses no DDD
-            .replace(/(\d)(\d{4})$/, '$1-$2'); // Põe o hífen
+            .replace(/\D/g, '')
+            .replace(/^(\d{2})(\d)/g, '($1) $2')
+            .replace(/(\d)(\d{4})$/, '$1-$2');
     };
 
     return (
@@ -154,14 +147,14 @@ const AdminPanel = () => {
             <div className="max-w-7xl mx-auto">
                 {/* HEADER */}
                 <header className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
-                    <div>
-                        <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
+                    <div className="text-center md:text-left">
+                        <h1 className="text-3xl font-bold text-gray-800 flex items-center justify-center md:justify-start gap-2">
                             <span className="bg-blue-600 text-white rounded-lg p-1.5 text-xl">🛡️</span>
                             Painel Admin
                         </h1>
-                        <p className="text-gray-500 mt-1">Gerencie usuários e permissões do sistema.</p>
+                        <p className="text-gray-500 mt-1 text-sm">Gerencie usuários e permissões do sistema.</p>
                     </div>
-                    <Link to="/app" className="px-5 py-2.5 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 shadow-sm hover:bg-gray-50 hover:text-blue-600 transition-all flex items-center gap-2">
+                    <Link to="/app" className="px-5 py-2.5 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 shadow-sm hover:bg-gray-50 hover:text-blue-600 transition-all flex items-center gap-2 active:scale-95">
                         ← Voltar ao Mapa
                     </Link>
                 </header>
@@ -225,11 +218,11 @@ const AdminPanel = () => {
                                 <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">WhatsApp</label>
                                 <input
                                     type="text"
-                                    placeholder="(46) 99999-9999" // Placeholder atualizado para guiar o usuário
+                                    placeholder="(46) 99999-9999"
                                     className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                                     value={novoWhats}
-                                    maxLength={15} // Limita o tamanho máximo
-                                    onChange={e => setNovoWhats(formatarTelefone(e.target.value))} // Aplica a máscara enquanto digita
+                                    maxLength={15}
+                                    onChange={e => setNovoWhats(formatarTelefone(e.target.value))}
                                 />
                             </div>
                             <button
@@ -243,8 +236,119 @@ const AdminPanel = () => {
                     </div>
                 </div>
 
-                {/* LISTA DE USUÁRIOS */}
-                <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
+                {/* --- MODO MOBILE: CARDS (RESPONSIVO) --- */}
+                <div className="md:hidden space-y-4">
+                    {usuarios.map((user) => (
+                        <div key={user.id} className={`bg-white p-4 rounded-xl shadow-sm border border-gray-200 ${editandoId === user.id ? 'ring-2 ring-blue-100 bg-blue-50/20' : ''}`}>
+                            
+                            {/* Cabeçalho do Card */}
+                            <div className="flex justify-between items-start mb-3">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center font-bold text-sm border border-gray-200">
+                                        {(user.nome || user.id || '?')[0].toUpperCase()}
+                                    </div>
+                                    <div>
+                                        {editandoId === user.id ? (
+                                            <input
+                                                type="text"
+                                                value={dadosEditados.nome || ''}
+                                                onChange={e => handleEditChange('nome', e.target.value)}
+                                                className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
+                                                placeholder="Nome"
+                                            />
+                                        ) : (
+                                            <h4 className="font-bold text-gray-800 text-base">{user.nome || 'Sem Nome'}</h4>
+                                        )}
+                                        <p className="text-xs text-gray-500 font-mono truncate max-w-[150px]">{user.id}</p>
+                                    </div>
+                                </div>
+                                
+                                {/* Badge de Role */}
+                                <div>
+                                    {user.role === 'admin' ? (
+                                        <span className="px-2 py-1 rounded text-[10px] font-bold bg-purple-100 text-purple-700 border border-purple-200">ADMIN</span>
+                                    ) : user.role === 'aguardando' ? (
+                                        <span className="px-2 py-1 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200 animate-pulse">PENDENTE</span>
+                                    ) : (
+                                        <span className="px-2 py-1 rounded text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-100">DIRIGENTE</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Corpo do Card (Whatsapp) */}
+                            <div className="mb-4 pl-[3.25rem]">
+                                {editandoId === user.id ? (
+                                    <input
+                                        type="text"
+                                        value={dadosEditados.whatsapp || ''}
+                                        onChange={e => handleEditChange('whatsapp', e.target.value)}
+                                        className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
+                                        placeholder="WhatsApp"
+                                    />
+                                ) : (
+                                    user.whatsapp ? (
+                                        <a href={`https://wa.me/${user.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm text-green-700 font-medium">
+                                            <span className="text-xs">🟢</span> {user.whatsapp}
+                                        </a>
+                                    ) : (
+                                        <span className="text-gray-300 text-sm italic">Sem WhatsApp</span>
+                                    )
+                                )}
+                            </div>
+
+                            {/* Botões de Ação Mobile */}
+                            <div className="flex gap-2 border-t border-gray-100 pt-3">
+                                {editandoId === user.id ? (
+                                    <>
+                                        <button onClick={salvarEdicao} className="flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-sm">Salvar</button>
+                                        <button onClick={cancelarEdicao} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-bold text-sm">Cancelar</button>
+                                    </>
+                                ) : (
+                                    <>
+                                        {user.role === 'aguardando' ? (
+                                            <button onClick={() => mudarRole(user, 'comum')} className="flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-sm shadow-sm active:scale-95 transition-transform">
+                                                Aprovar Acesso
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <button onClick={() => iniciarEdicao(user)} className="p-2 bg-gray-50 text-blue-600 rounded-lg border border-gray-200 flex-1 flex justify-center items-center">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                                                </button>
+
+                                                {/* BOTÃO PROMOVER / REBAIXAR - NOVO ÍCONE */}
+                                                <button 
+                                                    onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')} 
+                                                    className={`p-2 rounded-lg border flex-1 flex justify-center items-center transition-colors ${user.role === 'admin' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-yellow-50 text-yellow-600 border-yellow-100'}`}
+                                                >
+                                                    {user.role === 'admin' ? (
+                                                        // ÍCONE DE USUÁRIO (Rebaixar)
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                                                        </svg>
+                                                    ) : (
+                                                        // ÍCONE DE ESTRELA (Promover a Admin)
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                                        </svg>
+                                                    )}
+                                                </button>
+                                            </>
+                                        )}
+                                        <button onClick={() => remover(user.id)} className="p-2 bg-red-50 text-red-600 rounded-lg border border-red-100 flex-1 flex justify-center items-center">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    {usuarios.length === 0 && (
+                        <div className="p-8 text-center text-gray-400 italic bg-white rounded-xl border border-gray-200">Nenhum usuário encontrado.</div>
+                    )}
+                </div>
+
+                {/* --- MODO DESKTOP: TABELA (VISÍVEL APENAS EM TELAS GRANDES) --- */}
+                <div className="hidden md:block bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
                             <thead>
@@ -341,7 +445,7 @@ const AdminPanel = () => {
                                                     /* MODO VISUALIZAÇÃO */
                                                     <>
                                                         {user.role === 'aguardando' ? (
-                                                            <button onClick={() => mudarRole(user.id, 'comum')} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all">
+                                                            <button onClick={() => mudarRole(user, 'comum')} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all">
                                                                 Aprovar
                                                             </button>
                                                         ) : (
@@ -351,11 +455,21 @@ const AdminPanel = () => {
                                                         )}
 
                                                         <button
-                                                            onClick={() => mudarRole(user.id, user.role === 'admin' ? 'comum' : 'admin')}
-                                                            className={`p-2 rounded-lg transition-colors ${user.role === 'admin' ? 'text-purple-400 hover:text-purple-600 hover:bg-purple-50' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
-                                                            title={user.role === 'admin' ? "Rebaixar para Dirigente" : "Promover a Admin"}
+                                                            onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')}
+                                                            className={`p-2 rounded-lg transition-colors ${user.role === 'admin' ? 'text-purple-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'}`}
+                                                            title={user.role === 'admin' ? "Remover Admin (Voltar a Dirigente)" : "Promover a Admin"}
                                                         >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+                                                            {user.role === 'admin' ? (
+                                                                // ÍCONE DE USUÁRIO (REBAIXAR)
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                                                                </svg>
+                                                            ) : (
+                                                                // ÍCONE DE ESTRELA (PROMOVER)
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                                                </svg>
+                                                            )}
                                                         </button>
 
                                                         <button onClick={() => remover(user.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Remover Usuário">

@@ -303,14 +303,11 @@ const Relatorios = () => {
             columnStyles: {
                 3: { cellWidth: 95 }
             },
-            // --- CORREÇÃO: ADICIONANDO O LINK MANUALMENTE APÓS DESENHAR A CÉLULA ---
             didDrawCell: (data) => {
-                // Se for a coluna do NOME (index 1) e estiver no corpo da tabela
                 if (data.section === 'body' && data.column.index === 1) {
                     const t = dadosProcessados[data.row.index];
                     if (t && t.boundsStr) {
                         const deepLink = `${baseUrl}#/app?bounds=${t.boundsStr}`;
-                        // Cria uma área clicável invisível sobre a célula
                         doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: deepLink });
                     }
                 }
@@ -331,13 +328,25 @@ const Relatorios = () => {
                         <h1 className="text-2xl font-extrabold text-slate-800">Relatório de Territórios</h1>
                         <p className="text-slate-500 text-sm">Gerencie, filtre e veja o histórico.</p>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                        <button onClick={exportarPDF} className="justify-center px-4 py-2 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 text-sm flex items-center gap-2 transition-colors">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                            Baixar PDF
+                    
+                    <div className="flex items-center gap-3">
+                        {/* Botão Exportar PDF (Ícone Discreto) */}
+                        <button 
+                            onClick={exportarPDF} 
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-all active:scale-95"
+                            title="Baixar Relatório em PDF"
+                        >
+                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
                         </button>
-                        <Link to="/app" className="justify-center px-4 py-2 bg-white text-slate-700 font-medium rounded-lg border border-slate-200 shadow-sm hover:bg-slate-50 text-sm transition-colors text-center">
-                            ← Mapa
+                        
+                        {/* Botão Voltar ao Mapa */}
+                        <Link 
+                            to="/app" 
+                            className="px-5 py-2.5 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 shadow-sm hover:bg-gray-50 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
+                        >
+                            ← Voltar ao Mapa
                         </Link>
                     </div>
                 </header>
@@ -396,8 +405,91 @@ const Relatorios = () => {
                     </div>
                 </div>
 
-                {/* TABELA DE DADOS */}
-                <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                {/* --- MODO MOBILE: CARDS (VISÍVEL APENAS EM CELULAR) --- */}
+                <div className="md:hidden space-y-4">
+                    {dadosProcessados.map((t) => (
+                        <div key={t.id} className={`bg-white rounded-xl shadow border border-slate-200 p-4 transition-all ${linhasExpandidas.includes(t.id) ? 'ring-2 ring-blue-100' : ''}`}>
+                            <div className="flex justify-between items-start mb-3">
+                                <div>
+                                    <span className="inline-block px-2 py-0.5 rounded text-xs font-mono font-bold bg-slate-100 text-slate-500 mb-1">
+                                        #{t.numeroId}
+                                    </span>
+                                    <h3 className="font-bold text-slate-800 text-lg leading-tight">
+                                        {t.boundsStr ? (
+                                            <Link 
+                                                to={`/app?bounds=${t.boundsStr}`} 
+                                                className="text-blue-600 hover:underline"
+                                            >
+                                                {t.nome}
+                                            </Link>
+                                        ) : t.nome}
+                                    </h3>
+                                </div>
+                                <div className="flex flex-col items-end gap-1">
+                                    {t.status === 'ocupado' ?
+                                        <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 uppercase">Ocupado</span> :
+                                        <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 uppercase">Livre</span>
+                                    }
+                                    <span className={`px-2 py-1 rounded text-[10px] font-bold ${getCorTempo(t.diasParado)}`}>
+                                        {formatarTempo(t.diasParado)}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2 text-sm text-slate-600 mb-4">
+                                <div className="flex justify-between border-b border-slate-50 pb-1">
+                                    <span className="text-slate-400 text-xs">Responsável</span>
+                                    <span className="font-medium text-right max-w-[60%] truncate">{t.designadoNome || '-'}</span>
+                                </div>
+                                <div className="flex justify-between border-b border-slate-50 pb-1">
+                                    <span className="text-slate-400 text-xs">Designado em</span>
+                                    <span className="font-medium">{t.dataDesigStr}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-slate-400 text-xs">Última Conclusão</span>
+                                    <span className="font-medium">{t.dataUltimaStr}</span>
+                                </div>
+                            </div>
+
+                            <button 
+                                onClick={() => toggleLinha(t.id)}
+                                className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 text-xs font-bold uppercase rounded flex items-center justify-center gap-2 transition-colors"
+                            >
+                                {linhasExpandidas.includes(t.id) ? 'Ocultar Histórico' : 'Ver Histórico'}
+                                <span>{linhasExpandidas.includes(t.id) ? '▲' : '▼'}</span>
+                            </button>
+
+                            {linhasExpandidas.includes(t.id) && (
+                                <div className="mt-3 pt-3 border-t border-slate-100 animate-fade-in">
+                                    <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2">Histórico Recente</h4>
+                                    {t.historicoLista.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {t.historicoLista.map((hist, idx) => (
+                                                <div key={idx} className="text-xs bg-slate-50 p-2 rounded border border-slate-100">
+                                                    <div className="flex justify-between mb-1">
+                                                        <span className="text-slate-500">{hist.inicio}</span>
+                                                        <span className="text-green-600 font-bold">→ {hist.termino}</span>
+                                                    </div>
+                                                    <div className="text-slate-700 font-medium">{hist.nomes}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-slate-400 italic">Sem histórico.</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {dadosProcessados.length === 0 && (
+                        <div className="p-8 text-center text-slate-400 bg-white rounded-xl border border-slate-200">
+                            Nenhum território encontrado.
+                        </div>
+                    )}
+                </div>
+
+                {/* --- MODO DESKTOP: TABELA (VISÍVEL APENAS EM TELAS GRANDES) --- */}
+                <div className="hidden md:block bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm whitespace-nowrap">
                             <thead className="bg-slate-50 text-slate-500 font-semibold uppercase text-xs">
@@ -411,8 +503,8 @@ const Relatorios = () => {
                                     <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('nome')}>Nome {getSortIcon('nome')}</th>
                                     <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('status')}>Status {getSortIcon('status')}</th>
                                     <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('designadoNome')}>Responsável {getSortIcon('designadoNome')}</th>
-                                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none hidden sm:table-cell" onClick={() => handleSort('dataDesigObj')}>Designado em {getSortIcon('dataDesigObj')}</th>
-                                    <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 select-none hidden sm:table-cell" onClick={() => handleSort('dataUltimaObj')}>Conclusão {getSortIcon('dataUltimaObj')}</th>
+                                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('dataDesigObj')}>Designado em {getSortIcon('dataDesigObj')}</th>
+                                    <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('dataUltimaObj')}>Conclusão {getSortIcon('dataUltimaObj')}</th>
                                     <th className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 select-none" onClick={() => handleSort('diasParado')}>Tempo Parado {getSortIcon('diasParado')}</th>
                                 </tr>
                             </thead>
@@ -454,8 +546,8 @@ const Relatorios = () => {
                                                     <span className="text-[10px] text-blue-500 ml-1">(+ {t.cicloAtual.responsaveis.length - 1} outros)</span>
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 text-slate-500 text-xs hidden sm:table-cell">{t.dataDesigStr}</td>
-                                            <td className="px-4 py-3 text-right text-slate-500 text-xs hidden sm:table-cell">{t.dataUltimaStr}</td>
+                                            <td className="px-4 py-3 text-slate-500 text-xs">{t.dataDesigStr}</td>
+                                            <td className="px-4 py-3 text-right text-slate-500 text-xs">{t.dataUltimaStr}</td>
 
                                             <td className="px-4 py-3 text-right">
                                                 <span className={`px-2 py-1 rounded text-xs font-bold ${getCorTempo(t.diasParado)}`}>
@@ -471,7 +563,7 @@ const Relatorios = () => {
                                                     <div className="p-4 border-b border-slate-200 shadow-inner">
                                                         <div className="bg-white rounded-lg border border-slate-200 p-3">
                                                             <h4 className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
-                                                                📜 Histórico de Ciclos
+                                                                    📜 Histórico de Ciclos
                                                             </h4>
                                                             {t.historicoLista.length > 0 ? (
                                                                 <table className="w-full text-xs text-left">

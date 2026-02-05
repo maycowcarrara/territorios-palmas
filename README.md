@@ -2,7 +2,7 @@
 
 Sistema de gestão digital de territórios de pregação, desenvolvido como uma **PWA (Progressive Web App)** moderna para substituir os cartões físicos. O sistema oferece controle em tempo real de designações, progresso de quadras e relatórios administrativos detalhados.
 
-![Status](https://img.shields.io/badge/Versão-1.7.116-blue?style=for-the-badge)
+![Status](https://img.shields.io/badge/Versão-1.8.120-blue?style=for-the-badge)
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
 ![Firebase](https://img.shields.io/badge/Firebase-ffca28?style=for-the-badge&logo=firebase&logoColor=black)
 ![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)
@@ -102,6 +102,45 @@ O projeto possui script de deploy automático que atualiza a versão:
 npm run deploy
 # Isso executa: update-version -> build -> firebase deploy
 ```
+
+---
+
+## 📱 Como Testar no Celular
+
+Como o sistema utiliza Geolocalização e Login Google, testar no celular requer cuidados específicos (HTTPS).
+
+### Opção 1: Firebase Preview (Recomendada) ⭐
+
+Cria um link temporário seguro (HTTPS) idêntico à produção, ideal para testar **GPS e Login** sem afetar o site principal.
+
+1. Gere a build atualizada:
+   **Bash**
+
+   ```
+   npm run build
+   ```
+2. Faça o deploy para um canal de teste (ex: `teste-mobile`):
+   **Bash**
+
+   ```
+   npx firebase hosting:channel:deploy teste-mobile
+   ```
+3. Acesse o link gerado no terminal (ex: `https://territorios-palmas--teste-mobile...web.app`).
+
+   * **Dica:** Para atualizar, basta rodar os mesmos comandos novamente.
+
+### Opção 2: Rede Local (Wi-Fi)
+
+Útil para ajustes visuais rápidos, mas **o GPS pode falhar** por falta de HTTPS.
+
+1. Rode o servidor expondo o IP:
+   **Bash**
+
+   ```
+   npm run dev -- --host
+   ```
+2. Acesse o IP mostrado (ex: `http://192.168.0.X:5173`) no celular.
+3. **Nota:** Para o Login funcionar, adicione esse IP em *Authentication > Settings > Authorized Domains* no Firebase Console.
 
 ---
 
