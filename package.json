@@ -1,7 +1,7 @@
 {
   "name": "territorios-palmas",
   "private": true,
-  "version": "1.8.120",
+  "version": "1.8.122",
   "homepage": "https://maycowcarrara.github.io/territorios-palmas",
   "type": "module",
   "scripts": {

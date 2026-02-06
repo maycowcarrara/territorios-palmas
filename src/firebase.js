@@ -1,11 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import {
-    getFirestore,
-    initializeFirestore,
-    persistentLocalCache,
-    persistentMultipleTabManager
-} from "firebase/firestore";
+import { getFirestore } from "firebase/firestore"; // Apenas getFirestore
 
 const firebaseConfig = {
     apiKey: "AIzaSyBmR4PilWSpPeP_TNWi7LCn9iGso3xnWI8",
@@ -21,9 +16,5 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Mantemos essa configuração de cache pois ela ajuda o app a não travar
-export const db = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager()
-    })
-});
+// Agora o DB usa a conexão direta, sem "cache offline perigoso" para iOS
+export const db = getFirestore(app);

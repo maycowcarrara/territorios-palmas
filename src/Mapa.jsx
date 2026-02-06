@@ -48,6 +48,7 @@ const cssTooltip = `
   }
 
   .popup-btn-action { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 8px; border-radius: 6px; font-weight: bold; font-size: 12px; transition: background-color 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.1); cursor: pointer; }
+  .popup-btn-action:disabled { opacity: 0.7; cursor: not-allowed; }
 `;
 
 // Função Centroide
@@ -167,7 +168,6 @@ const MarcadorUsuario = ({ posicao }) => {
     if (!posicao) return null;
 
     const compartilharLocalizacao = () => {
-        // LINK CORRIGIDO PARA O FORMATO OFICIAL
         const linkGoogle = `https://www.google.com/maps?q=${posicao.lat},${posicao.lng}`;
         const textoEncoded = encodeURIComponent(`*Minha localização no território:*\n\n${linkGoogle}`);
         window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
@@ -369,6 +369,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const [msgPronta, setMsgPronta] = useState(null);
     const [posicaoClique, setPosicaoClique] = useState(null);
     const [modalConfig, setModalConfig] = useState({ open: false, dados: null });
+    // --- ESTADO DE CARREGAMENTO NOVO ---
+    const [loadingAction, setLoadingAction] = useState(false);
 
     const pontosFiltrados = useMemo(() => {
         const todos = dados.properties.pontos || [];
@@ -525,23 +527,44 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     const salvarDesignacao = async () => {
         const idSeguro = `t_${idTerritorio}`;
-        if (!usuarioSelecionado) {
-            if (!dadosBanco.designadoPara || !confirm("Confirmar devolução do território?")) return;
-            const ciclo = dadosBanco.cicloAtual || { dataInicio: dadosBanco.dataDesignacao || new Date(), responsaveis: [dadosBanco.designadoNome] };
-            const historico = { ...ciclo, dataTermino: new Date(), responsaveis: [...new Set([...(ciclo.responsaveis || []), dadosBanco.designadoNome])] };
-            const updateData = { designadoPara: null, designadoNome: null, dataDesignacao: null, cicloAtual: null, historico: arrayUnion(historico) };
-            if (isCompleto) { updateData.ultimaConclusao = new Date(); updateData.quadras_feitas = []; }
-            await updateDoc(doc(db, "territorios", idSeguro), updateData);
-            try { await addDoc(collection(db, "notificacoes"), { para: "ADMINS", texto: `Território ${nome} devolvido.`, data: new Date(), lida: false, tipo: 'devolucao' }); } catch (e) { }
-            setMsgPronta(null);
-            return;
+
+        // Bloqueia e mostra feedback
+        setLoadingAction(true);
+
+        try {
+            if (!usuarioSelecionado) {
+                if (!dadosBanco.designadoPara || !confirm("Confirmar devolução do território?")) {
+                    setLoadingAction(false);
+                    return;
+                }
+                const ciclo = dadosBanco.cicloAtual || { dataInicio: dadosBanco.dataDesignacao || new Date(), responsaveis: [dadosBanco.designadoNome] };
+                const historico = { ...ciclo, dataTermino: new Date(), responsaveis: [...new Set([...(ciclo.responsaveis || []), dadosBanco.designadoNome])] };
+                const updateData = { designadoPara: null, designadoNome: null, dataDesignacao: null, cicloAtual: null, historico: arrayUnion(historico) };
+                if (isCompleto) { updateData.ultimaConclusao = new Date(); updateData.quadras_feitas = []; }
+
+                await updateDoc(doc(db, "territorios", idSeguro), updateData);
+                try { await addDoc(collection(db, "notificacoes"), { para: "ADMINS", texto: `Território ${nome} devolvido.`, data: new Date(), lida: false, tipo: 'devolucao' }); } catch (e) { }
+
+                setMsgPronta(null);
+                alert("✅ Território devolvido com sucesso! Sincronizado com o servidor.");
+            } else {
+                const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
+                const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
+                let novoCiclo = dadosBanco.designadoPara ? { dataInicio: dadosBanco.cicloAtual?.dataInicio, responsaveis: [...new Set([...(dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome]), novoNome])] } : { dataInicio: new Date(), responsaveis: [novoNome] };
+
+                await updateDoc(doc(db, "territorios", idSeguro), { designadoPara: usuarioSelecionado, designadoNome: novoNome, dataDesignacao: new Date(), cicloAtual: novoCiclo });
+
+                const link = `${window.location.href.split('#')[0]}#/app?lat=${centro.lat}&lng=${centro.lng}&z=16`;
+                setMsgPronta({ texto: `Olá *${novoNome}*! \nO território *${nome}* foi designado para você.\n\n *Acesse:* ${link}\n\nBom trabalho!`, whatsapp: usuarioObj?.whatsapp, nome: novoNome });
+
+                alert(`✅ Designação salva com sucesso para ${novoNome}!`);
+            }
+        } catch (error) {
+            console.error("Erro ao salvar:", error);
+            alert("❌ ERRO AO SALVAR: Verifique sua conexão com a internet e tente novamente. A alteração NÃO foi salva.");
+        } finally {
+            setLoadingAction(false);
         }
-        const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
-        const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
-        let novoCiclo = dadosBanco.designadoPara ? { dataInicio: dadosBanco.cicloAtual?.dataInicio, responsaveis: [...new Set([...(dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome]), novoNome])] } : { dataInicio: new Date(), responsaveis: [novoNome] };
-        await updateDoc(doc(db, "territorios", idSeguro), { designadoPara: usuarioSelecionado, designadoNome: novoNome, dataDesignacao: new Date(), cicloAtual: novoCiclo });
-        const link = `${window.location.href.split('#')[0]}#/app?lat=${centro.lat}&lng=${centro.lng}&z=16`;
-        setMsgPronta({ texto: `Olá *${novoNome}*! \nO território *${nome}* foi designado para você.\n\n *Acesse:* ${link}\n\nBom trabalho!`, whatsapp: usuarioObj?.whatsapp, nome: novoNome });
     };
 
     const compartilharDiretamente = () => {
@@ -573,7 +596,16 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             <Polygon positions={posicoes} pathOptions={{ color: corBorda, weight: pesoBorda, fillColor: corPreenchimento, fillOpacity: opacidade, opacity: opacidadeBorda }} eventHandlers={{ click: (e) => setPosicaoClique(e.latlng) }}>
                 <Popup>
                     <div className="min-w-[260px] p-1 font-sans">
-                        <div className="border-b border-gray-200 pb-2 mb-2 text-center">
+                        <div className="border-b border-gray-200 pb-2 mb-2 text-center relative">
+                            {/* ÍCONE DE PROCESSANDO NO CABEÇALHO (POPUP) */}
+                            {loadingAction && (
+                                <div className="absolute top-0 right-0 animate-spin text-blue-600" title="Salvando alterações...">
+                                    <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                </div>
+                            )}
                             <strong className="text-lg font-bold text-gray-800 block break-words leading-tight">{nome}</strong>
                             {dadosBanco.ultimaConclusao && <span className="text-[10px] text-gray-500 uppercase">Última vez: {textoTempo} atrás</span>}
                         </div>
@@ -594,18 +626,47 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                     </div>
                                 ) : (
                                     <div className="animate-fade-in">
-                                        <div className="mb-2 p-2 bg-white rounded border border-slate-200 shadow-sm text-center">
-                                            <span className="text-[10px] text-slate-400 font-bold uppercase">Responsável: </span>
-                                            {dadosBanco.designadoPara ? <span className="text-sm font-bold text-blue-700">{dadosBanco.designadoNome}</span> : <span className="text-sm font-bold text-green-600">Livre</span>}
+                                        <div className="mb-3 p-3 bg-white rounded-lg border border-slate-200 shadow-sm text-center flex flex-col">
+                                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Responsável ATUAL</span>
+                                            {dadosBanco.designadoPara ? (
+                                                <span className="text-lg font-extrabold text-blue-800 uppercase leading-tight break-words">
+                                                    {dadosBanco.designadoNome}
+                                                </span>
+                                            ) : (
+                                                <span className="text-lg font-bold text-green-600">
+                                                    Livre
+                                                </span>
+                                            )}
                                         </div>
-                                        <select className="w-full p-2 mb-2 text-sm bg-white border border-gray-300 rounded outline-none" value={usuarioSelecionado} onChange={(e) => setUsuarioSelecionado(e.target.value)}>
+                                        <select
+                                            className="w-full p-2 mb-2 text-sm bg-white border border-gray-300 rounded outline-none disabled:bg-gray-100 disabled:text-gray-400"
+                                            value={usuarioSelecionado}
+                                            onChange={(e) => setUsuarioSelecionado(e.target.value)}
+                                            disabled={loadingAction}
+                                        >
                                             <option value="">-- Devolver / Livre --</option>
                                             {listaUsuarios.map(u => <option key={u.email} value={u.email} className={u.email === user.email ? "font-bold text-blue-600" : ""}>{u.nome}</option>)}
                                         </select>
-                                        <button onClick={salvarDesignacao} disabled={!dadosBanco.designadoPara && !usuarioSelecionado} className={`popup-btn-action text-white mb-2 ${!dadosBanco.designadoPara && !usuarioSelecionado ? 'bg-gray-300' : !usuarioSelecionado ? 'bg-red-500' : 'bg-blue-600'}`}>
-                                            {!dadosBanco.designadoPara && !usuarioSelecionado ? "Já está Livre" : !usuarioSelecionado ? "Devolver" : "Salvar"}
+                                        <button
+                                            onClick={salvarDesignacao}
+                                            disabled={(!dadosBanco.designadoPara && !usuarioSelecionado) || loadingAction}
+                                            className={`popup-btn-action text-white mb-2 ${loadingAction ? 'bg-slate-400 cursor-wait' :
+                                                (!dadosBanco.designadoPara && !usuarioSelecionado ? 'bg-gray-300' : !usuarioSelecionado ? 'bg-red-500' : 'bg-blue-600')
+                                                }`}
+                                        >
+                                            {loadingAction ? (
+                                                <span className="flex items-center gap-2">
+                                                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                    </svg>
+                                                    Processando...
+                                                </span>
+                                            ) : (
+                                                !dadosBanco.designadoPara && !usuarioSelecionado ? "Já está Livre" : !usuarioSelecionado ? "Devolver" : "Salvar"
+                                            )}
                                         </button>
-                                        {donoDoTerritorio && <button onClick={compartilharDiretamente} className="popup-btn-action bg-white border border-green-600 text-green-700 hover:bg-green-50 text-xs py-1 mt-2">Compartilhar Novamente</button>}
+                                        {donoDoTerritorio && <button onClick={compartilharDiretamente} disabled={loadingAction} className="popup-btn-action bg-white border border-green-600 text-green-700 hover:bg-green-50 text-xs py-1 mt-2">Compartilhar Novamente</button>}
                                         {isMeu && <button onClick={compartilharPontoEncontro} className="popup-btn-action bg-green-600 text-white mt-2">Ponto de Encontro</button>}
                                     </div>
                                 )}
