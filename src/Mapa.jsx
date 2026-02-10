@@ -316,10 +316,19 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrir
         const idSeguro = `t_${idTerritorio}`;
         const docRef = doc(db, "territorios", idSeguro);
 
+        // --- CORREÇÃO: SALVA A DATA DA ÚLTIMA ALTERAÇÃO NO BANCO ---
+        const timestampNow = new Date();
+
         if (isFeita) {
-            await updateDoc(docRef, { quadras_feitas: arrayRemove(quadra.id) });
+            await updateDoc(docRef, {
+                quadras_feitas: arrayRemove(quadra.id),
+                ultimaAlteracao: timestampNow // Atualiza data
+            });
         } else {
-            await updateDoc(docRef, { quadras_feitas: arrayUnion(quadra.id) });
+            await updateDoc(docRef, {
+                quadras_feitas: arrayUnion(quadra.id),
+                ultimaAlteracao: timestampNow // Atualiza data
+            });
             // Se completar todas
             if (qtdFeitas + 1 === totalQuadras) {
                 if (onConclusao) onConclusao();
@@ -369,7 +378,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const [msgPronta, setMsgPronta] = useState(null);
     const [posicaoClique, setPosicaoClique] = useState(null);
     const [modalConfig, setModalConfig] = useState({ open: false, dados: null });
-    // --- ESTADO DE CARREGAMENTO NOVO ---
     const [loadingAction, setLoadingAction] = useState(false);
 
     const pontosFiltrados = useMemo(() => {
@@ -388,7 +396,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     }));
 
     const nome = dados.properties.nome || `T-${idTerritorio}`;
-    const codigoTerritorio = nome.includes('-') ? nome.split('-')[0].trim() : nome; // Extrai código curto
+    const codigoTerritorio = nome.includes('-') ? nome.split('-')[0].trim() : nome;
     const coords = dados.geometry.coordinates[0];
     const posicoes = coords.map(coord => [coord[1], coord[0]]);
     const centro = calcularCentroide(coords);
@@ -430,7 +438,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         const novaNota = { id: crypto.randomUUID(), texto, autorEmail: user.email, autorNome: user.displayName || user.email.split('@')[0], data: new Date().toISOString() };
         const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
         let novoArray = Array.isArray(notasAtuais) ? [...notasAtuais, novaNota] : (typeof notasAtuais === 'string' ? [{ id: 'legacy', texto: notasAtuais, autorNome: 'Sistema', data: new Date().toISOString(), autorEmail: 'sistema' }, novaNota] : [novaNota]);
-        await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: novoArray });
+
+        // --- CORREÇÃO: ATUALIZA ULTIMA ALTERAÇÃO AO ADICIONAR NOTA ---
+        await updateDoc(docRef, {
+            [`notas_quadras.${quadraId}`]: novoArray,
+            ultimaAlteracao: new Date()
+        });
     };
 
     const editarNota = async (quadraId, noteId, novoTexto) => {
@@ -445,7 +458,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             }
             return n;
         });
-        await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: novoArray });
+
+        // --- CORREÇÃO: ATUALIZA ULTIMA ALTERAÇÃO AO EDITAR NOTA ---
+        await updateDoc(docRef, {
+            [`notas_quadras.${quadraId}`]: novoArray,
+            ultimaAlteracao: new Date()
+        });
     };
 
     const removerNota = async (quadraId, noteId) => {
@@ -453,9 +471,21 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         const idSeguro = `t_${idTerritorio}`;
         const docRef = doc(db, "territorios", idSeguro);
         const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
-        if (!Array.isArray(notasAtuais)) { if (noteId === 'legacy') await updateDoc(docRef, { [`notas_quadras.${quadraId}`]: deleteField() }); return; }
+
+        const updates = { ultimaAlteracao: new Date() }; // Prepara update com data
+
+        if (!Array.isArray(notasAtuais)) {
+            if (noteId === 'legacy') {
+                updates[`notas_quadras.${quadraId}`] = deleteField();
+                await updateDoc(docRef, updates);
+            }
+            return;
+        }
+
         const novoArray = notasAtuais.filter(n => n.id !== noteId);
-        await updateDoc(doc(db, "territorios", idSeguro), { [`notas_quadras.${quadraId}`]: novoArray });
+        updates[`notas_quadras.${quadraId}`] = novoArray;
+
+        await updateDoc(docRef, updates);
     };
 
     const abrirModalNota = (quadraId, notasAtuais) => {
@@ -473,7 +503,13 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const isCompleto = listaQuadras.length > 0 && dadosBanco.quadras_feitas?.length === listaQuadras.length;
     const feitas = dadosBanco.quadras_feitas?.length || 0;
     const total = listaQuadras.length;
+
+    // --- CÁLCULO DA PORCENTAGEM (PARA O TOOLTIP) ---
     const porcentagem = total > 0 ? (feitas / total) * 100 : 0;
+    const pctInteira = Math.round(porcentagem);
+
+    // --- NOME CURTO PARA O TOOLTIP ---
+    const nomeResponsavelCurto = dadosBanco.designadoNome ? dadosBanco.designadoNome.split(' ')[0] : "Ocupado";
 
     // VISIBILIDADE
     const deveMostrarQuadras = zoomLevel >= 17 && (isAdmin || isMeu);
@@ -685,7 +721,21 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                         {zoomLevel >= 16 && podeVerDetalhes && (
                             <>
                                 {!isOcupado && !isCompleto && (<><span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca"}</span><span className="label-tempo">{textoTempo}</span></>)}
-                                {isOcupado && <span className="label-status" style={{ color: '#666' }}>Ocupado</span>}
+                                {isOcupado && (
+                                    <span
+                                        className="label-status"
+                                        style={{
+                                            color: '#fff',
+                                            background: `linear-gradient(to right, #15803d ${pctInteira}%, #374151 ${pctInteira}%)`,
+                                            fontSize: '12px',
+                                            textShadow: 'none',
+                                            border: '1px solid white'
+                                        }}
+                                        title={`${feitas} de ${total} quadras (${pctInteira}%)`}
+                                    >
+                                        {nomeResponsavelCurto}
+                                    </span>
+                                )}
                                 {isCompleto && <span className="label-status" style={{ color: '#166534', background: '#dcfce7' }}>Feito!</span>}
                             </>
                         )}

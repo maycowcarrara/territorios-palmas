@@ -24,7 +24,7 @@ const Relatorios = () => {
                 // 1. Busca dados do Firebase
                 const querySnapshot = await getDocs(collection(db, "territorios"));
                 
-                // 2. Busca dados do GeoJSON (mapa.json) para calcular os bounds (zoom)
+                // 2. Busca dados do GeoJSON (mapa.json) para calcular bounds e TOTAL DE QUADRAS
                 const responseMap = await fetch('./mapa.json');
                 const geoData = await responseMap.json();
 
@@ -32,39 +32,48 @@ const Relatorios = () => {
                     const data = doc.data();
                     const numeroId = parseInt(doc.id.replace('t_', '')) || 0;
 
-                    // --- LÓGICA DE CÁLCULO DE BOUNDS PARA DEEP LINK ---
+                    // --- ENCONTRA A FEATURE NO MAPA ---
                     const feature = geoData.features.find(f => {
                         const fId = f.properties.id || (geoData.features.indexOf(f) + 1);
                         return fId === numeroId;
                     });
 
+                    // --- CÁLCULO DE PORCENTAGEM ---
+                    let totalQuadras = 0;
+                    let porcentagem = 0;
                     let boundsStr = null;
-                    if (feature && feature.geometry) {
-                        const coords = feature.geometry.type === 'MultiPolygon' 
-                            ? feature.geometry.coordinates.flat(2) 
-                            : feature.geometry.coordinates[0]; 
-                        
-                        if (coords) {
-                            let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-                            coords.forEach(p => {
-                                const lng = p[0];
-                                const lat = p[1];
-                                if (lat < minLat) minLat = lat;
-                                if (lat > maxLat) maxLat = lat;
-                                if (lng < minLng) minLng = lng;
-                                if (lng > maxLng) maxLng = lng;
-                            });
-                            boundsStr = `${minLat},${minLng},${maxLat},${maxLng}`;
+
+                    if (feature) {
+                        const pontos = feature.properties.pontos || [];
+                        totalQuadras = pontos.filter(p => !p.tipo || p.tipo === 'quadra' || p.tipo === 'endereco').length;
+                        if (totalQuadras === 0) totalQuadras = 1;
+
+                        const feitas = data.quadras_feitas?.length || 0;
+                        porcentagem = Math.round((feitas / totalQuadras) * 100);
+                        if (porcentagem > 100) porcentagem = 100;
+
+                        if (feature.geometry) {
+                            const coords = feature.geometry.type === 'MultiPolygon' 
+                                ? feature.geometry.coordinates.flat(2) 
+                                : feature.geometry.coordinates[0]; 
+                            
+                            if (coords) {
+                                let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+                                coords.forEach(p => {
+                                    const lng = p[0]; const lat = p[1];
+                                    if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+                                    if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
+                                });
+                                boundsStr = `${minLat},${minLng},${maxLat},${maxLng}`;
+                            }
                         }
                     }
 
-                    // --- LÓGICA DE DATAS ---
+                    // --- LÓGICA DE DATAS GERAIS ---
                     let diasParado = 0;
                     let dataUltimaStr = '-';
-                    let dataUltimaObj = null;
-
                     if (data.ultimaConclusao) {
-                        dataUltimaObj = data.ultimaConclusao.toDate ? data.ultimaConclusao.toDate() : new Date(data.ultimaConclusao);
+                        const dataUltimaObj = data.ultimaConclusao.toDate ? data.ultimaConclusao.toDate() : new Date(data.ultimaConclusao);
                         diasParado = Math.ceil(Math.abs(new Date() - dataUltimaObj) / (1000 * 60 * 60 * 24));
                         dataUltimaStr = dataUltimaObj.toLocaleDateString('pt-BR');
                     }
@@ -72,36 +81,57 @@ const Relatorios = () => {
                     let diasComDirigente = 0;
                     let dataDesigStr = '-';
                     let dataDesigObj = null;
-
                     if (data.designadoPara && data.dataDesignacao) {
                         dataDesigObj = data.dataDesignacao.toDate ? data.dataDesignacao.toDate() : new Date(data.dataDesignacao);
                         diasComDirigente = Math.ceil(Math.abs(new Date() - dataDesigObj) / (1000 * 60 * 60 * 24));
                         dataDesigStr = dataDesigObj.toLocaleDateString('pt-BR');
                     }
 
-                    // --- LÓGICA DE HISTÓRICO ---
+                    // --- LÓGICA REFINADA DA ÚLTIMA EDIÇÃO ---
+                    let diasSemEdicao = 0;
+                    let ultimaEdicaoTexto = "Sem dados";
+                    
+                    if (data.designadoPara) {
+                        // Prioriza 'ultimaAlteracao'. Se não tiver, usa 'dataDesignacao'. Se não tiver, usa 'agora'.
+                        let dataRef = null;
+                        if (data.ultimaAlteracao) {
+                            dataRef = data.ultimaAlteracao.toDate ? data.ultimaAlteracao.toDate() : new Date(data.ultimaAlteracao);
+                        } else if (dataDesigObj) {
+                            dataRef = dataDesigObj;
+                        } else {
+                            dataRef = new Date();
+                        }
+                        
+                        const agora = new Date();
+                        const diferencaMs = Math.abs(agora - dataRef); // Usa abs para evitar números negativos se dataRef for futuro (erro de relógio)
+                        
+                        const diferencaMinutos = Math.floor(diferencaMs / (1000 * 60));
+                        const diferencaHoras = Math.floor(diferencaMs / (1000 * 60 * 60));
+                        diasSemEdicao = Math.floor(diferencaMs / (1000 * 60 * 60 * 24)); 
+
+                        if (diferencaMinutos < 2) {
+                            ultimaEdicaoTexto = "agora mesmo";
+                        } else if (diferencaMinutos < 60) {
+                            ultimaEdicaoTexto = `há ${diferencaMinutos} min`;
+                        } else if (diferencaHoras < 24) {
+                            ultimaEdicaoTexto = `há ${diferencaHoras} h`;
+                        } else if (diasSemEdicao === 1) {
+                            ultimaEdicaoTexto = "ontem";
+                        } else {
+                            ultimaEdicaoTexto = `há ${diasSemEdicao} dias`;
+                        }
+                    }
+
+                    // --- HISTÓRICO ---
                     let historicoProcessado = [];
                     if (data.historico && Array.isArray(data.historico)) {
                         historicoProcessado = data.historico.map(h => {
                             const inicio = h.dataInicio?.toDate ? h.dataInicio.toDate() : (h.dataRetirada?.toDate ? h.dataRetirada.toDate() : new Date());
                             const fim = h.dataTermino?.toDate ? h.dataTermino.toDate() : (h.dataDevolucao?.toDate ? h.dataDevolucao.toDate() : new Date());
-
                             const inicioStr = !isNaN(inicio) ? inicio.toLocaleDateString('pt-BR') : '?';
                             const fimStr = !isNaN(fim) ? fim.toLocaleDateString('pt-BR') : '?';
-
-                            let listaNomes = "";
-                            if (Array.isArray(h.responsaveis)) {
-                                listaNomes = h.responsaveis.join(", ");
-                            } else {
-                                listaNomes = h.responsavel || "Desconhecido";
-                            }
-
-                            return {
-                                nomes: listaNomes,
-                                inicio: inicioStr,
-                                termino: fimStr,
-                                timestampFim: fim
-                            };
+                            let listaNomes = Array.isArray(h.responsaveis) ? h.responsaveis.join(", ") : (h.responsavel || "Desconhecido");
+                            return { nomes: listaNomes, inicio: inicioStr, termino: fimStr, timestampFim: fim };
                         });
                         historicoProcessado.sort((a, b) => b.timestampFim - a.timestampFim);
                         historicoProcessado = historicoProcessado.slice(0, 10);
@@ -115,9 +145,11 @@ const Relatorios = () => {
                         ...data,
                         nome: nomeSeguro,
                         diasParado,
-                        diasComDirigente,
+                        diasSemEdicao,
+                        ultimaEdicaoTexto,
+                        totalQuadras,
+                        porcentagem,
                         dataUltimaStr,
-                        dataUltimaObj,
                         dataDesigStr,
                         dataDesigObj,
                         historicoLista: historicoProcessado,
@@ -234,8 +266,6 @@ const Relatorios = () => {
     // --- PDF ---
     const exportarPDF = () => {
         const doc = new jsPDF();
-        
-        // Pega a URL base correta (remove hash se existir para montar limpo)
         const baseUrl = window.location.href.split('#')[0];
 
         doc.setFontSize(18);
@@ -254,11 +284,12 @@ const Relatorios = () => {
         const textoFiltro = busca ? `Busca: "${busca}"` : "Sem busca";
         doc.text(`Filtros: Status (${statusFiltro}) | Tempo (${textoTempoFiltro}) | ${textoFiltro}`, 14, 31);
 
-        const tableColumn = ["Cód.", "Nome", "Status", "Histórico / Ciclos", "Ult. Conclusão", "Tempo Parado"];
+        const tableColumn = ["Cód.", "Nome", "Status / Progresso", "Histórico / Ciclos", "Ult. Conclusão", "Tempo Parado"];
         const tableRows = [];
 
         dadosProcessados.forEach(t => {
             let textoHistorico = "";
+            let statusTexto = t.status === 'ocupado' ? `Ocupado (${t.porcentagem}%) - Ult. Ed: ${t.ultimaEdicaoTexto}` : 'Livre';
 
             if (t.status === 'ocupado') {
                 let atuais = t.designadoNome;
@@ -279,13 +310,12 @@ const Relatorios = () => {
                 textoHistorico += "\n(Sem histórico)";
             }
 
-            // Apenas define a cor azul se tiver link, mas a ação do clique é feita no didDrawCell
             const hasLink = !!t.boundsStr;
 
             const dadosLinha = [
                 t.numeroId,
                 { content: t.nome, styles: { textColor: hasLink ? [0, 0, 255] : [0, 0, 0] } },
-                t.status === 'ocupado' ? 'Ocupado' : 'Livre',
+                statusTexto,
                 textoHistorico,
                 t.dataUltimaStr,
                 t.diasParado > 0 ? formatarTempo(t.diasParado) : 'Nunca'
@@ -301,7 +331,7 @@ const Relatorios = () => {
             styles: { fontSize: 8, cellPadding: 2, valign: 'top' },
             headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255] },
             columnStyles: {
-                3: { cellWidth: 95 }
+                3: { cellWidth: 80 }
             },
             didDrawCell: (data) => {
                 if (data.section === 'body' && data.column.index === 1) {
@@ -330,7 +360,6 @@ const Relatorios = () => {
                     </div>
                     
                     <div className="flex items-center gap-3">
-                        {/* Botão Exportar PDF (Ícone Discreto) */}
                         <button 
                             onClick={exportarPDF} 
                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-all active:scale-95"
@@ -341,7 +370,6 @@ const Relatorios = () => {
                             </svg>
                         </button>
                         
-                        {/* Botão Voltar ao Mapa */}
                         <Link 
                             to="/app" 
                             className="px-5 py-2.5 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 shadow-sm hover:bg-gray-50 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
@@ -427,12 +455,26 @@ const Relatorios = () => {
                                 </div>
                                 <div className="flex flex-col items-end gap-1">
                                     {t.status === 'ocupado' ?
-                                        <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 uppercase">Ocupado</span> :
-                                        <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 uppercase">Livre</span>
+                                        <div className="flex flex-col items-end">
+                                            {/* PÍLULA PADRONIZADA COM TEXTO OCUPADO E NUMERO AO FUNDO (DIREITA) */}
+                                            <span 
+                                                className="inline-flex items-center justify-between px-3 py-1 rounded-full text-[10px] font-bold text-white border border-white/20 uppercase shadow-sm min-w-[100px]"
+                                                style={{ 
+                                                    background: `linear-gradient(90deg, #15803d ${t.porcentagem}%, #3b82f6 ${t.porcentagem}%)`,
+                                                    textShadow: '0px 1px 1px rgba(0,0,0,0.3)'
+                                                }}
+                                                title={`${t.porcentagem}% Concluído`}
+                                            >
+                                                <span>Ocupado</span>
+                                                <span className="opacity-50 text-[9px] ml-1">{t.porcentagem}%</span>
+                                            </span>
+                                            <span className={`text-[9px] mt-0.5 ${t.diasSemEdicao > 10 ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
+                                                {t.diasSemEdicao > 10 && '⚠️ '}Edição: {t.ultimaEdicaoTexto}
+                                            </span>
+                                        </div>
+                                         :
+                                        <span className="inline-flex items-center justify-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200 uppercase min-w-[100px]">Livre</span>
                                     }
-                                    <span className={`px-2 py-1 rounded text-[10px] font-bold ${getCorTempo(t.diasParado)}`}>
-                                        {formatarTempo(t.diasParado)}
-                                    </span>
                                 </div>
                             </div>
 
@@ -445,10 +487,20 @@ const Relatorios = () => {
                                     <span className="text-slate-400 text-xs">Designado em</span>
                                     <span className="font-medium">{t.dataDesigStr}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span className="text-slate-400 text-xs">Última Conclusão</span>
-                                    <span className="font-medium">{t.dataUltimaStr}</span>
-                                </div>
+                                {t.status === 'livre' && (
+                                    <div className="flex justify-between border-b border-slate-50 pb-1">
+                                        <span className="text-slate-400 text-xs">Última Conclusão</span>
+                                        <span className="font-medium">{t.dataUltimaStr}</span>
+                                    </div>
+                                )}
+                                {t.status === 'livre' && (
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400 text-xs">Tempo Parado</span>
+                                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${getCorTempo(t.diasParado)}`}>
+                                            {formatarTempo(t.diasParado)}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             <button 
@@ -519,7 +571,6 @@ const Relatorios = () => {
                                             </td>
                                             <td className="px-4 py-3 text-xs font-mono text-slate-400 font-bold">{t.numeroId}</td>
                                             
-                                            {/* NOME: LINK NA WEB (HTML) */}
                                             <td className="px-4 py-3 font-bold text-slate-700">
                                                 {t.boundsStr ? (
                                                     <Link 
@@ -536,8 +587,24 @@ const Relatorios = () => {
                                             
                                             <td className="px-4 py-3">
                                                 {t.status === 'ocupado' ?
-                                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 uppercase">Ocupado</span> :
-                                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 uppercase">Livre</span>
+                                                    <div className="flex flex-col items-start">
+                                                        {/* PÍLULA PADRONIZADA COM TEXTO OCUPADO E NUMERO AO FUNDO (DIREITA) */}
+                                                        <span 
+                                                            className="inline-flex items-center justify-between gap-1 px-3 py-1 rounded-full text-[10px] font-bold text-white border border-white/20 uppercase shadow-sm min-w-[100px]"
+                                                            style={{ 
+                                                                background: `linear-gradient(90deg, #15803d ${t.porcentagem}%, #3b82f6 ${t.porcentagem}%)`,
+                                                                textShadow: '0px 1px 1px rgba(0,0,0,0.3)'
+                                                            }}
+                                                            title={`${t.porcentagem}% Concluído`}
+                                                        >
+                                                            <span>Ocupado</span>
+                                                            <span className="opacity-50 text-[9px]">{t.porcentagem}%</span>
+                                                        </span>
+                                                        <span className={`text-[9px] ml-1 mt-0.5 ${t.diasSemEdicao > 10 ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
+                                                            {t.diasSemEdicao > 10 && '⚠️ '}Ult. ed: {t.ultimaEdicaoTexto}
+                                                        </span>
+                                                    </div> :
+                                                    <span className="inline-flex items-center justify-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200 uppercase min-w-[100px]">Livre</span>
                                                 }
                                             </td>
                                             <td className="px-4 py-3 text-slate-600">
@@ -556,14 +623,13 @@ const Relatorios = () => {
                                             </td>
                                         </tr>
 
-                                        {/* LINHA DE HISTÓRICO EXPANDIDA */}
                                         {linhasExpandidas.includes(t.id) && (
                                             <tr className="bg-slate-50 animate-fade-in">
                                                 <td colSpan="8" className="p-0">
                                                     <div className="p-4 border-b border-slate-200 shadow-inner">
                                                         <div className="bg-white rounded-lg border border-slate-200 p-3">
                                                             <h4 className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
-                                                                    📜 Histórico de Ciclos
+                                                                        📜 Histórico de Ciclos
                                                             </h4>
                                                             {t.historicoLista.length > 0 ? (
                                                                 <table className="w-full text-xs text-left">
