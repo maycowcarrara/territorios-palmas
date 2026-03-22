@@ -2,9 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
+import { useSistema } from './useSistema';
+import { getDefaultSistemaConfig, getSistemaTheme, slugifyCampanha } from './sistema';
 
 const AdminPanel = () => {
     const [usuarios, setUsuarios] = useState([]);
+    const [campanhas, setCampanhas] = useState([]);
+    const [campanhaTitulo, setCampanhaTitulo] = useState('');
+    const [campanhaSlug, setCampanhaSlug] = useState('');
+    const [salvandoCampanha, setSalvandoCampanha] = useState(false);
+    const { config: contextoSistema } = useSistema();
+    const temaSistema = getSistemaTheme(contextoSistema);
 
     // Estados para NOVO usuário
     const [novoEmail, setNovoEmail] = useState('');
@@ -32,6 +40,25 @@ const AdminPanel = () => {
             });
             setUsuarios(lista);
         });
+        return () => unsub();
+    }, []);
+
+    useEffect(() => {
+        const unsub = onSnapshot(collection(db, "campanhas"), (snapshot) => {
+            const lista = snapshot.docs.map((campanhaDoc) => ({
+                id: campanhaDoc.id,
+                ...campanhaDoc.data()
+            }));
+
+            lista.sort((a, b) => {
+                const dataA = a.atualizadaEm?.seconds || a.criadaEm?.seconds || 0;
+                const dataB = b.atualizadaEm?.seconds || b.criadaEm?.seconds || 0;
+                return dataB - dataA;
+            });
+
+            setCampanhas(lista);
+        });
+
         return () => unsub();
     }, []);
 
@@ -81,7 +108,6 @@ const AdminPanel = () => {
     // --- AÇÕES RÁPIDAS (ATUALIZADO COM CONFIRMAÇÃO) ---
     const mudarRole = async (user, novaRole) => {
         // Define a mensagem baseada na ação
-        const acao = novaRole === 'admin' ? 'PROMOVER a Administrador' : 'REBAIXAR para Dirigente';
         const alerta = novaRole === 'admin' 
             ? `⚠️ ATENÇÃO: Você está prestes a tornar ${user.nome || user.id} um ADMINISTRADOR.\n\nEle terá acesso total ao sistema, incluindo edição e exclusão de dados.\n\nDeseja continuar?`
             : `Deseja remover as permissões de administrador de ${user.nome || user.id}?`;
@@ -89,7 +115,9 @@ const AdminPanel = () => {
         if (confirm(alerta)) {
             try {
                 await updateDoc(doc(db, "usuarios", user.id), { role: novaRole });
-            } catch (e) { alert("Erro ao mudar permissão."); }
+            } catch {
+                alert("Erro ao mudar permissão.");
+            }
         }
     };
 
@@ -97,7 +125,9 @@ const AdminPanel = () => {
         if (confirm(`Tem certeza que deseja EXCLUIR DEFINITIVAMENTE o usuário ${email}?\n\nEssa ação não pode ser desfeita.`)) {
             try {
                 await deleteDoc(doc(db, "usuarios", email));
-            } catch (e) { alert("Erro ao remover."); }
+            } catch {
+                alert("Erro ao remover.");
+            }
         }
     };
 
@@ -129,6 +159,79 @@ const AdminPanel = () => {
 
     const handleEditChange = (campo, valor) => {
         setDadosEditados(prev => ({ ...prev, [campo]: valor }));
+    };
+
+    const ativarCampanha = async ({ id, titulo }) => {
+        setSalvandoCampanha(true);
+
+        try {
+            const agora = new Date();
+            await setDoc(doc(db, "campanhas", id), {
+                id,
+                titulo,
+                atualizadaEm: agora,
+                criadaEm: agora
+            }, { merge: true });
+
+            await setDoc(doc(db, "configuracoes", "sistema"), {
+                contextoAtivoId: id,
+                contextoAtivoTipo: 'campanha',
+                contextoAtivoTitulo: titulo,
+                contextoAtivoCor: 'violet',
+                campanhaAtiva: true,
+                campanha_ativa: id,
+                nome_campanha: titulo,
+                atualizadaEm: agora
+            }, { merge: true });
+
+            setCampanhaTitulo('');
+            setCampanhaSlug('');
+            alert(`✅ Campanha "${titulo}" ativada com sucesso!`);
+        } catch (error) {
+            console.error("Erro ao ativar campanha:", error);
+            alert("❌ Não foi possível ativar a campanha.");
+        } finally {
+            setSalvandoCampanha(false);
+        }
+    };
+
+    const handleCriarCampanha = async (e) => {
+        e.preventDefault();
+        const titulo = campanhaTitulo.trim();
+        const id = slugifyCampanha(campanhaSlug || titulo);
+
+        if (!titulo) {
+            alert("Informe o título da campanha.");
+            return;
+        }
+
+        if (!id) {
+            alert("Não consegui gerar um identificador válido para a campanha.");
+            return;
+        }
+
+        await ativarCampanha({ id, titulo });
+    };
+
+    const voltarModoNormal = async () => {
+        if (!confirm("Voltar o sistema para a pregação normal agora?")) return;
+
+        setSalvandoCampanha(true);
+        try {
+            const configNormal = getDefaultSistemaConfig();
+            await setDoc(doc(db, "configuracoes", "sistema"), {
+                ...configNormal,
+                campanha_ativa: configNormal.contextoAtivoId,
+                nome_campanha: '',
+                atualizadaEm: new Date()
+            }, { merge: true });
+            alert("✅ Sistema voltou para o modo normal.");
+        } catch (error) {
+            console.error("Erro ao voltar para o modo normal:", error);
+            alert("❌ Não foi possível voltar para o modo normal.");
+        } finally {
+            setSalvandoCampanha(false);
+        }
     };
 
     // --- CONTADORES ---
@@ -181,6 +284,126 @@ const AdminPanel = () => {
                             <p className={`text-3xl font-bold ${totalPendentes > 0 ? 'text-red-500 animate-pulse' : 'text-green-500'}`}>{totalPendentes}</p>
                         </div>
                         <div className="text-3xl opacity-20">⏳</div>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-8">
+                    <div className={`p-4 border-b border-gray-200 ${temaSistema.panelBg}`}>
+                        <h3 className={`font-bold flex items-center gap-2 ${temaSistema.panelText}`}>
+                            📢 Modo do Sistema
+                        </h3>
+                    </div>
+                    <div className="p-5 space-y-5">
+                        <div className={`rounded-xl border p-4 ${temaSistema.panelBorder} ${temaSistema.panelBg}`}>
+                            <p className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Modo atual</p>
+                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                <div>
+                                    <p className={`text-xl font-extrabold ${temaSistema.accentText}`}>
+                                        {contextoSistema.campanhaAtiva ? contextoSistema.contextoAtivoTitulo : 'Pregação normal'}
+                                    </p>
+                                    <p className="text-sm text-gray-500">
+                                        {contextoSistema.campanhaAtiva
+                                            ? `Campanha ativa (${contextoSistema.contextoAtivoId})`
+                                            : 'Sem campanha ativa no momento.'}
+                                    </p>
+                                </div>
+                                <div className="flex flex-col gap-2 md:items-end">
+                                    {contextoSistema.campanhaAtiva ? (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={voltarModoNormal}
+                                                disabled={salvandoCampanha}
+                                                className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 disabled:opacity-50"
+                                            >
+                                                Desativar Campanha
+                                            </button>
+                                            <p className="text-xs text-gray-500">
+                                                O sistema volta imediatamente para a pregação normal.
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <p className="text-xs text-gray-500 md:text-right">
+                                            Quando precisar, ative uma campanha abaixo.
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleCriarCampanha} className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr_auto] gap-3 items-end">
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Título da Campanha</label>
+                                <input
+                                    type="text"
+                                    placeholder="Ex: Convite da Celebração"
+                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
+                                    value={campanhaTitulo}
+                                    onChange={(e) => setCampanhaTitulo(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Identificador Interno</label>
+                                <input
+                                    type="text"
+                                    placeholder="ex: celebracao_2026"
+                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
+                                    value={campanhaSlug}
+                                    onChange={(e) => setCampanhaSlug(slugifyCampanha(e.target.value))}
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={salvandoCampanha}
+                                className="bg-violet-600 hover:bg-violet-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all active:scale-95 disabled:opacity-50"
+                            >
+                                {salvandoCampanha ? 'Salvando...' : 'Ativar Campanha'}
+                            </button>
+                        </form>
+
+                        {campanhas.length > 0 && (
+                            <div>
+                                <p className="text-xs font-bold text-gray-500 uppercase mb-3">Campanhas cadastradas</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {campanhas.map((campanha) => {
+                                        const ativa = contextoSistema.contextoAtivoId === campanha.id;
+                                        return (
+                                            <div key={campanha.id} className={`rounded-xl border p-4 ${ativa ? 'border-violet-200 bg-violet-50' : 'border-gray-200 bg-gray-50'}`}>
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div>
+                                                        <p className="font-bold text-gray-800">{campanha.titulo || campanha.id}</p>
+                                                        <p className="text-xs text-gray-400 font-mono mt-1">{campanha.id}</p>
+                                                    </div>
+                                                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${ativa ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 border border-gray-200'}`}>
+                                                        {ativa ? 'ATIVA' : 'SALVA'}
+                                                    </span>
+                                                </div>
+                                                <div className="mt-4 grid grid-cols-1 gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => ativarCampanha({ id: campanha.id, titulo: campanha.titulo || campanha.id })}
+                                                        disabled={salvandoCampanha || ativa}
+                                                        className="w-full rounded-lg border border-violet-200 bg-white py-2 text-sm font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                                                    >
+                                                        {ativa ? 'Campanha Atual' : 'Reativar'}
+                                                    </button>
+                                                    {ativa && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={voltarModoNormal}
+                                                            disabled={salvandoCampanha}
+                                                            className="w-full rounded-lg bg-red-600 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                                                        >
+                                                            Desativar Agora
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 

@@ -1,55 +1,51 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot, setDoc, addDoc, collection } from 'firebase/firestore'; // Adicionado addDoc e collection
+import { doc, onSnapshot, setDoc, addDoc, collection } from 'firebase/firestore';
 import { db } from './firebase';
 
+const ESTADO_BASE = {
+    email: null,
+    isAdmin: false,
+    autorizado: false,
+    loading: false,
+    role: null
+};
+
 export function useUsuario(user) {
-    const [isAdmin, setIsAdmin] = useState(false);
-    const [autorizado, setAutorizado] = useState(false);
-    const [loading, setLoading] = useState(true);
-    const [role, setRole] = useState(null); // NOVO: Guarda o status exato (ex: 'aguardando')
+    const emailFormatado = user?.email?.toLowerCase() || null;
+    const [estado, setEstado] = useState(ESTADO_BASE);
 
     useEffect(() => {
-        if (!user?.email) {
-            setAutorizado(false);
-            setIsAdmin(false);
-            setRole(null);
-            setLoading(false);
+        if (!emailFormatado) {
             return;
         }
 
-        setLoading(true);
-
-        const emailFormatado = user.email.toLowerCase();
         const docRef = doc(db, "usuarios", emailFormatado);
 
         const unsub = onSnapshot(docRef, async (docSnap) => {
-
             if (docSnap.exists()) {
                 const dados = docSnap.data();
-
-                // Só entra se for 'admin' ou 'comum'.
                 const podeEntrar = dados.role === 'admin' || dados.role === 'comum';
 
-                setAutorizado(podeEntrar);
-                setIsAdmin(dados.role === 'admin');
-                setRole(dados.role); // Atualiza o role atual
-                setLoading(false);
+                setEstado({
+                    email: emailFormatado,
+                    autorizado: podeEntrar,
+                    isAdmin: dados.role === 'admin',
+                    loading: false,
+                    role: dados.role
+                });
             } else {
-                // Se não existe, cria a solicitação AUTOMATICAMENTE
                 try {
-                    // 1. Cria o usuário
                     await setDoc(docRef, {
                         role: 'aguardando',
                         nome: user.displayName || 'Sem nome',
                         emailOriginal: user.email,
-                        whatsapp: '', // Inicializa vazio para evitar undefined
+                        whatsapp: '',
                         criadoEm: new Date()
                     });
 
-                    // 2. NOVO: Envia notificação para os ADMINS
                     await addDoc(collection(db, "notificacoes"), {
                         texto: `Novo cadastro pendente: ${user.displayName || user.email}`,
-                        para: 'ADMINS', // Palavra-chave que seu Sininho já reconhece
+                        para: 'ADMINS',
                         origem: 'sistema',
                         lida: false,
                         data: new Date()
@@ -59,17 +55,32 @@ export function useUsuario(user) {
                     console.error("Erro ao criar solicitação:", err);
                 }
 
-                // Mantém bloqueado, mas define o role como aguardando para a UI saber
-                setAutorizado(false);
-                setIsAdmin(false);
-                setRole('aguardando');
-                setLoading(false);
+                setEstado({
+                    email: emailFormatado,
+                    autorizado: false,
+                    isAdmin: false,
+                    loading: false,
+                    role: 'aguardando'
+                });
             }
         });
 
         return () => unsub();
-    }, [user]);
+    }, [emailFormatado, user]);
 
-    // Retornamos o 'role' agora
-    return { isAdmin, autorizado, loading, role };
+    if (!emailFormatado) {
+        return ESTADO_BASE;
+    }
+
+    if (estado.email !== emailFormatado) {
+        return {
+            email: emailFormatado,
+            isAdmin: false,
+            autorizado: false,
+            loading: true,
+            role: null
+        };
+    }
+
+    return estado;
 }

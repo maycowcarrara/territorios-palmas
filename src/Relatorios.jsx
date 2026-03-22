@@ -1,13 +1,19 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from './firebase';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { loadMapaData } from './mapData';
+import { buildFeatureIndex, getFeatureBoundsStr, getTerritorioQuadrasCount } from './mapaUtils';
+import { useSistema } from './useSistema';
+import { getSistemaTheme, isNormalContext } from './sistema';
+import { getTerritorioContextCollectionRef, getTerritorioNumeroFromDocId, mergeTerritorioData } from './territorioContext';
 
 const Relatorios = () => {
     const [territorios, setTerritorios] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [exportandoPdf, setExportandoPdf] = useState(false);
+    const { config: contextoSistema, loading: carregandoSistema } = useSistema();
+    const temaSistema = getSistemaTheme(contextoSistema);
 
     // --- ESTADO PARA MULTI-EXPANSÃO ---
     const [linhasExpandidas, setLinhasExpandidas] = useState([]);
@@ -19,57 +25,57 @@ const Relatorios = () => {
     const [sortConfig, setSortConfig] = useState({ key: 'diasParado', direction: 'desc' });
 
     useEffect(() => {
+        if (carregandoSistema) return;
+
+        let ativo = true;
+
         const carregarDados = async () => {
             try {
-                // 1. Busca dados do Firebase
-                const querySnapshot = await getDocs(collection(db, "territorios"));
-                
-                // 2. Busca dados do GeoJSON (mapa.json) para calcular bounds e TOTAL DE QUADRAS
-                const responseMap = await fetch('./mapa.json');
-                const geoData = await responseMap.json();
+                const geoData = await loadMapaData();
+                const featureMap = buildFeatureIndex(geoData);
+                const territoriosBaseSnapshot = await getDocs(collection(db, "territorios"));
+                const baseMap = new Map();
 
-                const lista = querySnapshot.docs.map(doc => {
-                    const data = doc.data();
-                    const numeroId = parseInt(doc.id.replace('t_', '')) || 0;
+                territoriosBaseSnapshot.forEach((territorioDoc) => {
+                    baseMap.set(getTerritorioNumeroFromDocId(territorioDoc.id), territorioDoc.data());
+                });
 
-                    // --- ENCONTRA A FEATURE NO MAPA ---
-                    const feature = geoData.features.find(f => {
-                        const fId = f.properties.id || (geoData.features.indexOf(f) + 1);
-                        return fId === numeroId;
+                const contextoMap = new Map();
+                if (!isNormalContext(contextoSistema.contextoAtivoId)) {
+                    const contextoSnapshot = await getDocs(query(
+                        getTerritorioContextCollectionRef(db),
+                        where("contextoId", "==", contextoSistema.contextoAtivoId)
+                    ));
+
+                    contextoSnapshot.forEach((territorioDoc) => {
+                        const data = territorioDoc.data();
+                        const numeroId = data.territorioNumero || getTerritorioNumeroFromDocId(territorioDoc.id);
+                        contextoMap.set(numeroId, data);
+                    });
+                }
+
+                const numeros = Array.from(featureMap.keys()).sort((a, b) => a - b);
+                const lista = numeros.map((numeroId) => {
+                    const feature = featureMap.get(numeroId);
+                    const nomeSeguro = feature?.properties?.nome || `Território ${numeroId}`;
+                    const data = mergeTerritorioData({
+                        contextoId: contextoSistema.contextoAtivoId,
+                        nomeFallback: nomeSeguro,
+                        baseData: baseMap.get(numeroId),
+                        stateData: isNormalContext(contextoSistema.contextoAtivoId) ? baseMap.get(numeroId) : contextoMap.get(numeroId)
                     });
 
-                    // --- CÁLCULO DE PORCENTAGEM ---
-                    let totalQuadras = 0;
+                    let totalQuadras = 1;
                     let porcentagem = 0;
-                    let boundsStr = null;
+                    const boundsStr = getFeatureBoundsStr(feature);
 
                     if (feature) {
-                        const pontos = feature.properties.pontos || [];
-                        totalQuadras = pontos.filter(p => !p.tipo || p.tipo === 'quadra' || p.tipo === 'endereco').length;
-                        if (totalQuadras === 0) totalQuadras = 1;
-
+                        totalQuadras = getTerritorioQuadrasCount(feature);
                         const feitas = data.quadras_feitas?.length || 0;
                         porcentagem = Math.round((feitas / totalQuadras) * 100);
                         if (porcentagem > 100) porcentagem = 100;
-
-                        if (feature.geometry) {
-                            const coords = feature.geometry.type === 'MultiPolygon' 
-                                ? feature.geometry.coordinates.flat(2) 
-                                : feature.geometry.coordinates[0]; 
-                            
-                            if (coords) {
-                                let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-                                coords.forEach(p => {
-                                    const lng = p[0]; const lat = p[1];
-                                    if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
-                                    if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
-                                });
-                                boundsStr = `${minLat},${minLng},${maxLat},${maxLng}`;
-                            }
-                        }
                     }
 
-                    // --- LÓGICA DE DATAS GERAIS ---
                     let diasParado = 0;
                     let dataUltimaStr = '-';
                     if (data.ultimaConclusao) {
@@ -78,21 +84,16 @@ const Relatorios = () => {
                         dataUltimaStr = dataUltimaObj.toLocaleDateString('pt-BR');
                     }
 
-                    let diasComDirigente = 0;
                     let dataDesigStr = '-';
                     let dataDesigObj = null;
                     if (data.designadoPara && data.dataDesignacao) {
                         dataDesigObj = data.dataDesignacao.toDate ? data.dataDesignacao.toDate() : new Date(data.dataDesignacao);
-                        diasComDirigente = Math.ceil(Math.abs(new Date() - dataDesigObj) / (1000 * 60 * 60 * 24));
                         dataDesigStr = dataDesigObj.toLocaleDateString('pt-BR');
                     }
 
-                    // --- LÓGICA REFINADA DA ÚLTIMA EDIÇÃO ---
                     let diasSemEdicao = 0;
                     let ultimaEdicaoTexto = "Sem dados";
-                    
                     if (data.designadoPara) {
-                        // Prioriza 'ultimaAlteracao'. Se não tiver, usa 'dataDesignacao'. Se não tiver, usa 'agora'.
                         let dataRef = null;
                         if (data.ultimaAlteracao) {
                             dataRef = data.ultimaAlteracao.toDate ? data.ultimaAlteracao.toDate() : new Date(data.ultimaAlteracao);
@@ -101,13 +102,12 @@ const Relatorios = () => {
                         } else {
                             dataRef = new Date();
                         }
-                        
+
                         const agora = new Date();
-                        const diferencaMs = Math.abs(agora - dataRef); // Usa abs para evitar números negativos se dataRef for futuro (erro de relógio)
-                        
+                        const diferencaMs = Math.abs(agora - dataRef);
                         const diferencaMinutos = Math.floor(diferencaMs / (1000 * 60));
                         const diferencaHoras = Math.floor(diferencaMs / (1000 * 60 * 60));
-                        diasSemEdicao = Math.floor(diferencaMs / (1000 * 60 * 60 * 24)); 
+                        diasSemEdicao = Math.floor(diferencaMs / (1000 * 60 * 60 * 24));
 
                         if (diferencaMinutos < 2) {
                             ultimaEdicaoTexto = "agora mesmo";
@@ -122,7 +122,6 @@ const Relatorios = () => {
                         }
                     }
 
-                    // --- HISTÓRICO ---
                     let historicoProcessado = [];
                     if (data.historico && Array.isArray(data.historico)) {
                         historicoProcessado = data.historico.map(h => {
@@ -130,17 +129,15 @@ const Relatorios = () => {
                             const fim = h.dataTermino?.toDate ? h.dataTermino.toDate() : (h.dataDevolucao?.toDate ? h.dataDevolucao.toDate() : new Date());
                             const inicioStr = !isNaN(inicio) ? inicio.toLocaleDateString('pt-BR') : '?';
                             const fimStr = !isNaN(fim) ? fim.toLocaleDateString('pt-BR') : '?';
-                            let listaNomes = Array.isArray(h.responsaveis) ? h.responsaveis.join(", ") : (h.responsavel || "Desconhecido");
+                            const listaNomes = Array.isArray(h.responsaveis) ? h.responsaveis.join(", ") : (h.responsavel || "Desconhecido");
                             return { nomes: listaNomes, inicio: inicioStr, termino: fimStr, timestampFim: fim };
                         });
                         historicoProcessado.sort((a, b) => b.timestampFim - a.timestampFim);
                         historicoProcessado = historicoProcessado.slice(0, 10);
                     }
 
-                    const nomeSeguro = data.nome || `Território ${doc.id}`;
-
                     return {
-                        id: doc.id,
+                        id: isNormalContext(contextoSistema.contextoAtivoId) ? `t_${numeroId}` : `${contextoSistema.contextoAtivoId}__t_${numeroId}`,
                         numeroId,
                         ...data,
                         nome: nomeSeguro,
@@ -158,16 +155,24 @@ const Relatorios = () => {
                     };
                 });
 
-                setTerritorios(lista);
-                setLoading(false);
+                if (ativo) {
+                    setTerritorios(lista);
+                    setLoading(false);
+                }
             } catch (error) {
                 console.error("Erro ao carregar dados:", error);
-                setLoading(false);
+                if (ativo) {
+                    setLoading(false);
+                }
             }
         };
 
         carregarDados();
-    }, []);
+
+        return () => {
+            ativo = false;
+        };
+    }, [carregandoSistema, contextoSistema]);
 
     const formatarTempo = (dias) => {
         if (dias === 0) return "Hoje";
@@ -208,7 +213,7 @@ const Relatorios = () => {
         if (tipo === 'criticos') setTempoFiltro('4_meses');
     };
 
-    const dadosProcessados = useMemo(() => {
+    const dadosProcessados = (() => {
         let dados = [...territorios];
         if (statusFiltro !== 'todos') dados = dados.filter(t => t.status === statusFiltro);
         if (tempoFiltro === '2_meses') dados = dados.filter(t => t.diasParado > 60);
@@ -237,7 +242,7 @@ const Relatorios = () => {
             });
         }
         return dados;
-    }, [territorios, busca, statusFiltro, tempoFiltro, sortConfig]);
+    })();
 
     const handleSort = (key) => {
         let direction = 'asc';
@@ -264,90 +269,104 @@ const Relatorios = () => {
     };
 
     // --- PDF ---
-    const exportarPDF = () => {
-        const doc = new jsPDF();
-        const baseUrl = window.location.href.split('#')[0];
+    const exportarPDF = async () => {
+        if (exportandoPdf) return;
 
-        doc.setFontSize(18);
-        doc.text("Relatório de Territórios", 14, 20);
-        doc.setFontSize(10);
-        doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 26);
+        setExportandoPdf(true);
+        try {
+            const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+                import('jspdf'),
+                import('jspdf-autotable')
+            ]);
 
-        doc.setFontSize(8);
-        doc.setTextColor(100);
+            const doc = new jsPDF();
+            const baseUrl = window.location.href.split('#')[0];
+            const tituloRelatorio = contextoSistema.campanhaAtiva
+                ? `Relatório de Territórios - ${contextoSistema.contextoAtivoTitulo}`
+                : "Relatório de Territórios";
 
-        let textoTempoFiltro = "Todos";
-        if (tempoFiltro === '2_meses') textoTempoFiltro = "+2 Meses";
-        if (tempoFiltro === '4_meses') textoTempoFiltro = "+4 Meses";
-        if (tempoFiltro === '6_meses') textoTempoFiltro = "+6 Meses";
+            doc.setFontSize(18);
+            doc.text(tituloRelatorio, 14, 20);
+            doc.setFontSize(10);
+            doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 26);
 
-        const textoFiltro = busca ? `Busca: "${busca}"` : "Sem busca";
-        doc.text(`Filtros: Status (${statusFiltro}) | Tempo (${textoTempoFiltro}) | ${textoFiltro}`, 14, 31);
+            doc.setFontSize(8);
+            doc.setTextColor(100);
 
-        const tableColumn = ["Cód.", "Nome", "Status / Progresso", "Histórico / Ciclos", "Ult. Conclusão", "Tempo Parado"];
-        const tableRows = [];
+            let textoTempoFiltro = "Todos";
+            if (tempoFiltro === '2_meses') textoTempoFiltro = "+2 Meses";
+            if (tempoFiltro === '4_meses') textoTempoFiltro = "+4 Meses";
+            if (tempoFiltro === '6_meses') textoTempoFiltro = "+6 Meses";
 
-        dadosProcessados.forEach(t => {
-            let textoHistorico = "";
-            let statusTexto = t.status === 'ocupado' ? `Ocupado (${t.porcentagem}%) - Ult. Ed: ${t.ultimaEdicaoTexto}` : 'Livre';
+            const textoFiltro = busca ? `Busca: "${busca}"` : "Sem busca";
+            doc.text(`Filtros: Status (${statusFiltro}) | Tempo (${textoTempoFiltro}) | ${textoFiltro}`, 14, 31);
 
-            if (t.status === 'ocupado') {
-                let atuais = t.designadoNome;
-                if (t.cicloAtual && Array.isArray(t.cicloAtual.responsaveis)) {
-                    atuais = t.cicloAtual.responsaveis.join(", ");
+            const tableColumn = ["Cód.", "Nome", "Status / Progresso", "Histórico / Ciclos", "Ult. Conclusão", "Tempo Parado"];
+            const tableRows = [];
+
+            dadosProcessados.forEach(t => {
+                let textoHistorico = "";
+                let statusTexto = t.status === 'ocupado' ? `Ocupado (${t.porcentagem}%) - Ult. Ed: ${t.ultimaEdicaoTexto}` : 'Livre';
+
+                if (t.status === 'ocupado') {
+                    let atuais = t.designadoNome;
+                    if (t.cicloAtual && Array.isArray(t.cicloAtual.responsaveis)) {
+                        atuais = t.cicloAtual.responsaveis.join(", ");
+                    }
+                    textoHistorico += `[EM ANDAMENTO]\nDirigentes: ${atuais}\nDesde: ${t.dataDesigStr}\n\n`;
+                } else {
+                    textoHistorico += "LIVRE\n";
                 }
-                textoHistorico += `[EM ANDAMENTO]\nDirigentes: ${atuais}\nDesde: ${t.dataDesigStr}\n\n`;
-            } else {
-                textoHistorico += "LIVRE\n";
-            }
 
-            if (t.historicoLista && t.historicoLista.length > 0) {
-                textoHistorico += "-- HISTÓRICO --\n";
-                t.historicoLista.forEach(h => {
-                    textoHistorico += `• Início: ${h.inicio} - Dirigentes: ${h.nomes} - Término: ${h.termino}\n`;
-                });
-            } else {
-                textoHistorico += "\n(Sem histórico)";
-            }
+                if (t.historicoLista && t.historicoLista.length > 0) {
+                    textoHistorico += "-- HISTÓRICO --\n";
+                    t.historicoLista.forEach(h => {
+                        textoHistorico += `• Início: ${h.inicio} - Dirigentes: ${h.nomes} - Término: ${h.termino}\n`;
+                    });
+                } else {
+                    textoHistorico += "\n(Sem histórico)";
+                }
 
-            const hasLink = !!t.boundsStr;
+                const hasLink = !!t.boundsStr;
 
-            const dadosLinha = [
-                t.numeroId,
-                { content: t.nome, styles: { textColor: hasLink ? [0, 0, 255] : [0, 0, 0] } },
-                statusTexto,
-                textoHistorico,
-                t.dataUltimaStr,
-                t.diasParado > 0 ? formatarTempo(t.diasParado) : 'Nunca'
-            ];
-            tableRows.push(dadosLinha);
-        });
+                tableRows.push([
+                    t.numeroId,
+                    { content: t.nome, styles: { textColor: hasLink ? [0, 0, 255] : [0, 0, 0] } },
+                    statusTexto,
+                    textoHistorico,
+                    t.dataUltimaStr,
+                    t.diasParado > 0 ? formatarTempo(t.diasParado) : 'Nunca'
+                ]);
+            });
 
-        autoTable(doc, {
-            head: [tableColumn],
-            body: tableRows,
-            startY: 35,
-            theme: 'grid',
-            styles: { fontSize: 8, cellPadding: 2, valign: 'top' },
-            headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255] },
-            columnStyles: {
-                3: { cellWidth: 80 }
-            },
-            didDrawCell: (data) => {
-                if (data.section === 'body' && data.column.index === 1) {
-                    const t = dadosProcessados[data.row.index];
-                    if (t && t.boundsStr) {
-                        const deepLink = `${baseUrl}#/app?bounds=${t.boundsStr}`;
-                        doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: deepLink });
+            autoTable(doc, {
+                head: [tableColumn],
+                body: tableRows,
+                startY: 35,
+                theme: 'grid',
+                styles: { fontSize: 8, cellPadding: 2, valign: 'top' },
+                headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255] },
+                columnStyles: {
+                    3: { cellWidth: 80 }
+                },
+                didDrawCell: (data) => {
+                    if (data.section === 'body' && data.column.index === 1) {
+                        const t = dadosProcessados[data.row.index];
+                        if (t && t.boundsStr) {
+                            const deepLink = `${baseUrl}#/app?bounds=${t.boundsStr}`;
+                            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: deepLink });
+                        }
                     }
                 }
-            }
-        });
+            });
 
-        doc.save(`Relatorio_Territorios.pdf`);
+            doc.save(`Relatorio_Territorios.pdf`);
+        } finally {
+            setExportandoPdf(false);
+        }
     };
 
-    if (loading) return <div className="flex h-screen items-center justify-center text-blue-600 font-bold">Carregando dados...</div>;
+    if (loading || carregandoSistema) return <div className="flex h-screen items-center justify-center text-blue-600 font-bold">Carregando dados...</div>;
 
     return (
         <div className="min-h-screen bg-slate-50 p-4 font-sans">
@@ -357,13 +376,20 @@ const Relatorios = () => {
                     <div className="text-center md:text-left">
                         <h1 className="text-2xl font-extrabold text-slate-800">Relatório de Territórios</h1>
                         <p className="text-slate-500 text-sm">Gerencie, filtre e veja o histórico.</p>
+                        {contextoSistema.campanhaAtiva && (
+                            <span className={`mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold ${temaSistema.panelBg} ${temaSistema.panelText} ${temaSistema.panelBorder}`}>
+                                <span>📢</span>
+                                <span>Modo atual: {contextoSistema.contextoAtivoTitulo}</span>
+                            </span>
+                        )}
                     </div>
                     
                     <div className="flex items-center gap-3">
                         <button 
                             onClick={exportarPDF} 
+                            disabled={exportandoPdf}
                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-all active:scale-95"
-                            title="Baixar Relatório em PDF"
+                            title={exportandoPdf ? "Gerando PDF..." : "Baixar Relatório em PDF"}
                         >
                             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />

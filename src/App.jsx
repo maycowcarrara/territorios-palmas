@@ -1,15 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { HashRouter, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, googleProvider, db } from './firebase';
 import { collection, query, where, getDocs, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
 import Mapa from './Mapa';
 import { useUsuario } from './useUsuario';
-import AdminPanel from './AdminPanel';
-import Relatorios from './Relatorios';
 import appInfo from './version.json';
-import AutoUpdate, { checkForUpdate } from './AutoUpdate';
+import AutoUpdate from './AutoUpdate';
+import { checkForUpdate } from './updateUtils';
 import AjudaModal from './AjudaModal';
+import { loadMapaData } from './mapData';
+import { buildFeatureIndex, getFeatureBoundsStr } from './mapaUtils';
+import { useSistema } from './useSistema';
+import { getSistemaTheme, isNormalContext } from './sistema';
+import { getTerritorioContextCollectionRef } from './territorioContext';
+import { useCoberturaCampanha } from './useCoberturaCampanha';
+
+const AdminPanel = lazy(() => import('./AdminPanel'));
+const Relatorios = lazy(() => import('./Relatorios'));
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 let deferredPromptGlobal = null;
@@ -194,68 +202,92 @@ const SininhoNotificacoes = ({ user, isAdmin }) => {
 };
 
 // --- MODAL MEUS TERRITÓRIOS ---
-const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate }) => {
+const SistemaChip = ({ contextoSistema, compact = false, coberturaCampanha = null, carregandoCobertura = false }) => {
+  if (!contextoSistema?.campanhaAtiva) return null;
+
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full border px-2 py-1 font-bold ${compact ? 'text-[10px]' : 'text-xs'} bg-violet-900/45 text-violet-50 border-violet-200/35`}>
+      <span>📢</span>
+      <span className="truncate max-w-[180px]">{contextoSistema.contextoAtivoTitulo}</span>
+      {carregandoCobertura ? (
+        <span className="rounded-full bg-violet-950/35 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-violet-100">
+          ...
+        </span>
+      ) : coberturaCampanha ? (
+        <span className="rounded-full bg-violet-950/35 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-violet-100 whitespace-nowrap">
+          {coberturaCampanha.percentualCoberto}% coberto
+        </span>
+      ) : null}
+    </span>
+  );
+};
+
+const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema }) => {
   const [lista, setLista] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const temaSistema = getSistemaTheme(contextoSistema);
 
   useEffect(() => {
-    if (isOpen && user) {
-      carregarMeusTerritorios();
-    }
-  }, [isOpen, user]);
+    if (!isOpen || !user) return;
 
-  const carregarMeusTerritorios = async () => {
-    setLoading(true);
-    try {
-      const q = query(collection(db, "territorios"), where("designadoPara", "==", user.email));
-      const querySnapshot = await getDocs(q);
-      const meusDocs = [];
-      querySnapshot.forEach((doc) => meusDocs.push({ id: doc.id, ...doc.data() }));
+    let ativo = true;
 
-      if (meusDocs.length > 0) {
-        const response = await fetch('./mapa.json');
-        const geoData = await response.json();
+    const carregarMeusTerritorios = async () => {
+      try {
+        const meusDocs = [];
 
-        const listaCompleta = meusDocs.map(doc => {
-          const numeroId = parseInt(doc.id.replace('t_', ''));
-          const feature = geoData.features.find(f => {
-            const fId = f.properties.id || (geoData.features.indexOf(f) + 1);
-            return fId === numeroId;
+        if (isNormalContext(contextoSistema?.contextoAtivoId)) {
+          const q = query(collection(db, "territorios"), where("designadoPara", "==", user.email));
+          const querySnapshot = await getDocs(q);
+          querySnapshot.forEach((territorioDoc) => meusDocs.push({ id: territorioDoc.id, ...territorioDoc.data() }));
+        } else {
+          const q = query(getTerritorioContextCollectionRef(db), where("contextoId", "==", contextoSistema.contextoAtivoId));
+          const querySnapshot = await getDocs(q);
+          querySnapshot.forEach((territorioDoc) => {
+            const data = territorioDoc.data();
+            if (data.designadoPara === user.email) {
+              meusDocs.push({ id: territorioDoc.id, ...data });
+            }
           });
+        }
 
-          // Lógica de Zoom Automático (Bounds)
-          let boundsStr = null;
-          if (feature) {
-            const coords = feature.geometry.coordinates[0];
-            let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-            coords.forEach(p => {
-              const lng = p[0];
-              const lat = p[1];
-              if (lat < minLat) minLat = lat;
-              if (lat > maxLat) maxLat = lat;
-              if (lng < minLng) minLng = lng;
-              if (lng > maxLng) maxLng = lng;
-            });
-            boundsStr = `${minLat},${minLng},${maxLat},${maxLng}`;
-          }
+        let listaCompleta = [];
+        if (meusDocs.length > 0) {
+          const geoData = await loadMapaData();
+          const featureMap = buildFeatureIndex(geoData);
 
-          let dataFormatada = "Data desc.";
-          if (doc.dataDesignacao) {
-            const d = doc.dataDesignacao.toDate ? doc.dataDesignacao.toDate() : new Date(doc.dataDesignacao);
-            dataFormatada = d.toLocaleDateString('pt-BR');
-          }
+          listaCompleta = meusDocs.map((territorioDoc) => {
+            const numeroId = territorioDoc.territorioNumero || parseInt(String(territorioDoc.id).replace(/.*t_/, ''));
+            const feature = featureMap.get(numeroId);
+            const boundsStr = getFeatureBoundsStr(feature);
 
-          return { ...doc, numeroId, boundsStr, dataFormatada };
-        });
+            let dataFormatada = "Data desc.";
+            if (territorioDoc.dataDesignacao) {
+              const d = territorioDoc.dataDesignacao.toDate ? territorioDoc.dataDesignacao.toDate() : new Date(territorioDoc.dataDesignacao);
+              dataFormatada = d.toLocaleDateString('pt-BR');
+            }
+
+            return { ...territorioDoc, numeroId, boundsStr, dataFormatada };
+          });
+        }
 
         listaCompleta.sort((a, b) => a.numeroId - b.numeroId);
-        setLista(listaCompleta);
-      } else {
-        setLista([]);
+        if (ativo) {
+          setLista(listaCompleta);
+        }
+      } catch (error) {
+        console.error(error);
+        if (ativo) {
+          setLista([]);
+        }
       }
-    } catch (error) { console.error(error); }
-    setLoading(false);
-  };
+    };
+
+    carregarMeusTerritorios();
+
+    return () => {
+      ativo = false;
+    };
+  }, [contextoSistema, isOpen, user]);
 
   const irParaMapa = (item) => {
     if (item.boundsStr) {
@@ -272,22 +304,22 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate }) => {
   return (
     <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl p-0 w-full max-w-sm animate-fade-in overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-blue-600 text-white">
-          <h3 className="text-lg font-bold flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-            </svg>
-            Meus Territórios
-          </h3>
+        <div className={`p-4 border-b border-gray-100 flex justify-between items-center ${temaSistema.headerBg} text-white`}>
+          <div className="min-w-0">
+            <h3 className="text-lg font-bold flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+              </svg>
+              Meus Territórios
+            </h3>
+            <div className="mt-2">
+              <SistemaChip contextoSistema={contextoSistema} compact />
+            </div>
+          </div>
           <button onClick={onClose} className="text-white/80 hover:text-white font-bold text-xl px-2">✕</button>
         </div>
         <div className="overflow-y-auto p-4 flex-1">
-          {loading ? (
-            <div className="flex flex-col items-center py-8 text-gray-400">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2"></div>
-              <p className="text-sm">Buscando seus territórios...</p>
-            </div>
-          ) : lista.length === 0 ? (
+          {lista.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <p className="mb-2 text-4xl">🤷‍♂️</p>
               <p>Nenhum território designado para você no momento.</p>
@@ -341,13 +373,11 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
 };
 
 // --- MENU LATERAL (ATUALIZADO - ORDEM REAJUSTADA) ---
-const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda }) => {
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
+const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda, contextoSistema, coberturaCampanha, carregandoCobertura }) => {
+  const [deferredPrompt, setDeferredPrompt] = useState(() => deferredPromptGlobal);
+  const temaSistema = getSistemaTheme(contextoSistema);
 
   useEffect(() => {
-    if (deferredPromptGlobal) {
-      setDeferredPrompt(deferredPromptGlobal);
-    }
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -380,7 +410,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
       <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[2001] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
 
         {/* CABEÇALHO DO MENU */}
-        <div className="bg-blue-600 p-6 text-white flex-shrink-0">
+        <div className={`${temaSistema.headerBg} p-6 text-white flex-shrink-0`}>
           <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -398,6 +428,13 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
           <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-800/50 border border-blue-400/30 text-blue-100">
             {isAdmin ? 'Administrador' : 'Dirigente'}
           </span>
+          <div className="mt-3">
+            <SistemaChip
+              contextoSistema={contextoSistema}
+              coberturaCampanha={coberturaCampanha}
+              carregandoCobertura={carregandoCobertura}
+            />
+          </div>
         </div>
 
         {/* CORPO DO MENU */}
@@ -426,7 +463,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
                 </svg>
-                Gerenciar Usuários
+                Painel do Sistema
               </button>
             </>
           )}
@@ -500,6 +537,9 @@ function Dashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [verificandoLogin, setVerificandoLogin] = useState(true);
+  const { config: contextoSistema, loading: carregandoSistema } = useSistema();
+  const temaSistema = getSistemaTheme(contextoSistema);
+  const coberturaCampanha = useCoberturaCampanha(contextoSistema);
 
   // Estados dos modais
   const [menuAberto, setMenuAberto] = useState(false);
@@ -527,7 +567,7 @@ function Dashboard() {
   };
 
   // 1. TELA DE CARREGANDO
-  if (verificandoLogin || (user && verificandoBanco)) {
+  if (verificandoLogin || (user && verificandoBanco) || carregandoSistema) {
     return (
       <div className="h-[100dvh] flex items-center justify-center bg-gray-100">
         <div className="flex flex-col items-center gap-4">
@@ -593,6 +633,9 @@ function Dashboard() {
         handleLogout={handleLogout}
         abrirAjuda={() => setAjudaAberta(true)}
         abrirLegenda={() => setLegendaAberta(true)}
+        contextoSistema={contextoSistema}
+        coberturaCampanha={coberturaCampanha}
+        carregandoCobertura={coberturaCampanha.loading}
       />
 
       <LegendaModal
@@ -612,21 +655,38 @@ function Dashboard() {
         onClose={() => setMeusTerritoriosAberto(false)}
         user={user}
         navigate={navigate}
+        contextoSistema={contextoSistema}
       />
 
       {/* CABEÇALHO */}
-      <div className="h-16 bg-blue-600 text-white shadow-md z-20 px-4 flex items-center justify-between flex-shrink-0">
+      <div className={`h-16 ${temaSistema.headerBg} text-white shadow-md z-20 px-4 flex items-center justify-between flex-shrink-0`}>
         
         {/* LADO ESQUERDO: LOGO (Mobile) vs TÍTULO (Desktop) */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           {/* Logo: Visível no mobile (sm:hidden esconde em telas maiores) */}
           <img 
             src="./icon-192.png" 
             alt="Logo" 
-            className="h-9 w-9 rounded-lg shadow-sm border border-blue-400/50 sm:hidden" 
+            className={`h-9 w-9 rounded-lg shadow-sm ${temaSistema.headerBorder} border sm:hidden`} 
           />
-          {/* Texto: Visível no desktop (hidden esconde no mobile) */}
-          <span className="text-xl font-bold tracking-wide hidden sm:block">Territórios</span>
+          <div className="min-w-0">
+            <span className="text-xl font-bold tracking-wide hidden sm:block">Territórios</span>
+            <div className="sm:hidden">
+              <SistemaChip
+                contextoSistema={contextoSistema}
+                compact
+                coberturaCampanha={coberturaCampanha}
+                carregandoCobertura={coberturaCampanha.loading}
+              />
+            </div>
+          </div>
+          <div className="hidden sm:block">
+            <SistemaChip
+              contextoSistema={contextoSistema}
+              coberturaCampanha={coberturaCampanha}
+              carregandoCobertura={coberturaCampanha.loading}
+            />
+          </div>
         </div>
 
         {/* LADO DIREITO: ÍCONES E BOTÕES */}
@@ -636,7 +696,7 @@ function Dashboard() {
           {isAdmin && (
             <button
               onClick={() => navigate('/relatorios')}
-              className="p-2 text-white/90 hover:text-white hover:bg-blue-500 rounded-full transition-colors relative"
+              className={`p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
               title="Relatórios"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -649,7 +709,7 @@ function Dashboard() {
           {!isAdmin && (
             <button
               onClick={() => setAjudaAberta(true)}
-              className="p-2 text-white/90 hover:text-white hover:bg-blue-500 rounded-full transition-colors relative"
+              className={`p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
               title="Como Usar"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -662,7 +722,7 @@ function Dashboard() {
 
           <button
             onClick={() => setMeusTerritoriosAberto(true)}
-            className="flex items-center gap-1 px-3 py-1.5 bg-blue-700/80 hover:bg-blue-800 rounded-full shadow-sm text-sm font-semibold transition-colors active:scale-95 border border-blue-500"
+            className={`flex items-center gap-1 px-3 py-1.5 ${temaSistema.headerSoft} ${temaSistema.headerSoftHover} rounded-full shadow-sm text-sm font-semibold transition-colors active:scale-95 ${temaSistema.headerBorder} border`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
@@ -672,7 +732,7 @@ function Dashboard() {
 
           <button
             onClick={() => setMenuAberto(true)}
-            className="p-1 hover:bg-blue-700 rounded transition-colors ml-1"
+            className={`p-1 ${temaSistema.headerHover} rounded transition-colors ml-1`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -682,32 +742,79 @@ function Dashboard() {
       </div>
 
       <div className="flex-1 bg-gray-100 relative z-0">
-        <Mapa user={user} isAdmin={isAdmin} />
+        <Mapa user={user} isAdmin={isAdmin} contextoSistema={contextoSistema} />
       </div>
     </div>
   );
 }
 
-// --- APP PRINCIPAL ---
-function App() {
-  const [user, setUser] = useState(null);
+function RouteGuard({ children, adminOnly = false }) {
+  const [authState, setAuthState] = useState({ user: auth.currentUser, loading: !auth.currentUser });
 
-  // 1. Monitora o Auth Globalmente
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setAuthState({ user: currentUser, loading: false });
     });
-    return () => unsub();
+
+    return () => unsubscribe();
   }, []);
 
+  const { user, loading } = authState;
+  const { autorizado, isAdmin, loading: loadingUsuario } = useUsuario(user);
+
+  if (loading || (user && loadingUsuario)) {
+    return (
+      <div className="h-[100dvh] flex items-center justify-center bg-gray-100">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+          <span className="text-blue-600 font-semibold text-sm animate-pulse">Verificando acesso...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (!autorizado) {
+    return <Navigate to="/app" replace />;
+  }
+
+  if (adminOnly && !isAdmin) {
+    return <Navigate to="/app" replace />;
+  }
+
+  return children;
+}
+
+function LazyPage({ children }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="h-[100dvh] flex items-center justify-center bg-gray-100">
+          <div className="flex flex-col items-center gap-4">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+            <span className="text-blue-600 font-semibold text-sm animate-pulse">Abrindo tela...</span>
+          </div>
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
+
+// --- APP PRINCIPAL ---
+function App() {
   return (
     <HashRouter>
       <AutoUpdate />
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/app" element={<Dashboard />} />
-        <Route path="/admin" element={<AdminPanel />} />
-        <Route path="/relatorios" element={<Relatorios />} />
+        <Route path="/admin" element={<RouteGuard adminOnly><LazyPage><AdminPanel /></LazyPage></RouteGuard>} />
+        <Route path="/relatorios" element={<RouteGuard adminOnly><LazyPage><Relatorios /></LazyPage></RouteGuard>} />
       </Routes>
     </HashRouter>
   );

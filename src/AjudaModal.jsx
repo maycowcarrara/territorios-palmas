@@ -1,6 +1,6 @@
 import React from 'react';
 
-const AjudaModal = ({ isOpen, onClose, isAdmin }) => {
+const AjudaModal = ({ isOpen, onClose }) => {
     if (!isOpen) return null;
 
     return (
@@ -28,10 +28,18 @@ const AjudaModal = ({ isOpen, onClose, isAdmin }) => {
                 {/* Conteúdo Rolável */}
                 <div className="p-6 overflow-y-auto space-y-6">
 
-                    {/* NOVO RECURSO: Observações */}
+                    <section className="bg-violet-50 border border-violet-200 rounded-xl p-4">
+                        <h4 className="font-bold text-violet-800 mb-2 flex items-center gap-2 text-lg">
+                            <span>📢</span> Modo Campanha
+                        </h4>
+                        <p className="text-sm text-gray-700">
+                            Quando houver uma campanha ativa, o topo do app muda de cor e mostra o nome da campanha com o percentual já coberto. Nesse modo, o andamento da campanha é separado da pregação normal.
+                        </p>
+                    </section>
+
                     <section className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
                         <h4 className="font-bold text-yellow-800 mb-3 flex items-center gap-2 text-lg">
-                            <span>💬</span> Novo: Observações nas Quadras
+                            <span>💬</span> Observações nas Quadras
                         </h4>
                         <p className="text-sm text-gray-700 mb-3">
                             Registre informações importantes (ex: "Cachorro bravo", "Morador da casa n° 45 pediu para não visitar...") em cada quadra.
@@ -54,11 +62,13 @@ const AjudaModal = ({ isOpen, onClose, isAdmin }) => {
                         <p className="text-xs text-gray-500 italic text-center mt-2">
                             * Uma bolinha amarela aparecerá nas quadras que possuem anotações.
                         </p>
+                        <p className="text-xs text-gray-600 text-center mt-2">
+                            Essas observações continuam visíveis mesmo quando o sistema entra em campanha.
+                        </p>
                     </section>
 
                     <hr className="border-gray-100" />
 
-                    {/* Ferramentas Úteis (NOVA SEÇÃO) */}
                     <section>
                         <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
                             <span className="bg-blue-100 text-blue-600 p-1 rounded">🚀</span>
@@ -97,7 +107,6 @@ const AjudaModal = ({ isOpen, onClose, isAdmin }) => {
 
                     <hr className="border-gray-100" />
 
-                    {/* Básico: Marcar Quadras */}
                     <section>
                         <h4 className="font-bold text-gray-800 mb-2 flex items-center gap-2">
                             <span className="bg-blue-100 text-blue-600 p-1 rounded">1</span>
@@ -118,7 +127,6 @@ const AjudaModal = ({ isOpen, onClose, isAdmin }) => {
                         </div>
                     </section>
 
-                    {/* Dica de Designação */}
                     <section className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                         <h4 className="font-bold text-blue-800 text-sm mb-1">💡 Dica Importante</h4>
                         <p className="text-xs text-blue-700">

@@ -1,8 +1,18 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker } from 'react-leaflet';
-import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, query, where, deleteField } from 'firebase/firestore';
+import { onSnapshot, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, query, where, deleteField } from 'firebase/firestore';
 import { db } from './firebase';
+import { loadMapaData } from './mapData';
+import { getFeatureId } from './mapaUtils';
+import {
+    buildBaseTerritorioDefaults,
+    buildContextTerritorioDefaults,
+    getTerritorioBaseRef,
+    getTerritorioStateRef,
+    mergeTerritorioData
+} from './territorioContext';
+import { isNormalContext } from './sistema';
 import L from 'leaflet';
 
 // --- CSS ---
@@ -145,7 +155,7 @@ const ControlesNavegacao = ({ setPosicaoUsuario }) => {
             setPosicaoUsuario(e.latlng);
             map.flyTo(e.latlng, 17);
             setBuscando(false);
-        }).on("locationerror", function (e) {
+        }).on("locationerror", function () {
             alert("Ative o GPS.");
             setBuscando(false);
         });
@@ -205,13 +215,12 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
     }, [dados]);
 
     useEffect(() => {
-        if (isOpen) {
-            setTexto('');
-            setEditandoId(null);
-            setTimeout(() => {
-                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-            }, 100);
-        }
+        if (!isOpen) return;
+        const timeoutId = window.setTimeout(() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }, 100);
+
+        return () => window.clearTimeout(timeoutId);
     }, [isOpen, dados]);
 
     const handleSubmit = () => {
@@ -310,30 +319,10 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
 };
 
 // --- QUADRA MARKER ---
-const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrirNota, totalQuadras, qtdFeitas, onConclusao }) => {
+const QuadraMarker = ({ quadra, isFeita, podeEditar, nota, onAbrirNota, onAlternarQuadra }) => {
     const alternarQuadra = async () => {
         if (!podeEditar) return;
-        const idSeguro = `t_${idTerritorio}`;
-        const docRef = doc(db, "territorios", idSeguro);
-
-        // --- CORREÇÃO: SALVA A DATA DA ÚLTIMA ALTERAÇÃO NO BANCO ---
-        const timestampNow = new Date();
-
-        if (isFeita) {
-            await updateDoc(docRef, {
-                quadras_feitas: arrayRemove(quadra.id),
-                ultimaAlteracao: timestampNow // Atualiza data
-            });
-        } else {
-            await updateDoc(docRef, {
-                quadras_feitas: arrayUnion(quadra.id),
-                ultimaAlteracao: timestampNow // Atualiza data
-            });
-            // Se completar todas
-            if (qtdFeitas + 1 === totalQuadras) {
-                if (onConclusao) onConclusao();
-            }
-        }
+        await onAlternarQuadra(quadra.id, isFeita);
     };
 
     const handleContextMenu = (e) => {
@@ -372,8 +361,15 @@ const QuadraMarker = ({ quadra, idTerritorio, isFeita, podeEditar, nota, onAbrir
 };
 
 // --- TERRITÓRIO DETALHADO ATUALIZADO ---
-const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, listaUsuarios, ocultarCores, showRefs, showCondos }) => {
-    const [dadosBanco, setDadosBanco] = useState({ status: 'aberto', quadras_feitas: [], designadoPara: null, designadoNome: null, ultimaConclusao: null });
+const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, listaUsuarios, ocultarCores, showRefs, showCondos, contextoSistema }) => {
+    const nome = dados.properties.nome || `T-${idTerritorio}`;
+    const contextoId = contextoSistema?.contextoAtivoId || 'normal';
+    const contextoNormal = isNormalContext(contextoId);
+    const dadosBaseIniciais = useMemo(() => buildBaseTerritorioDefaults(nome), [nome]);
+    const dadosContextoIniciais = useMemo(() => buildContextTerritorioDefaults({ idTerritorio, nome, contextoSistema }), [contextoSistema, idTerritorio, nome]);
+
+    const [dadosBase, setDadosBase] = useState(dadosBaseIniciais);
+    const [dadosContexto, setDadosContexto] = useState(dadosContextoIniciais);
     const [usuarioSelecionado, setUsuarioSelecionado] = useState("");
     const [msgPronta, setMsgPronta] = useState(null);
     const [posicaoClique, setPosicaoClique] = useState(null);
@@ -395,23 +391,57 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         lng: p.lng
     }));
 
-    const nome = dados.properties.nome || `T-${idTerritorio}`;
     const codigoTerritorio = nome.includes('-') ? nome.split('-')[0].trim() : nome;
     const coords = dados.geometry.coordinates[0];
     const posicoes = coords.map(coord => [coord[1], coord[0]]);
     const centro = calcularCentroide(coords);
+    const baseRef = useMemo(() => getTerritorioBaseRef(db, idTerritorio), [idTerritorio]);
+    const stateRef = useMemo(() => getTerritorioStateRef(db, idTerritorio, contextoId), [contextoId, idTerritorio]);
+
+    const dadosBanco = useMemo(() => mergeTerritorioData({
+        contextoId,
+        nomeFallback: nome,
+        baseData: dadosBase,
+        stateData: contextoNormal ? dadosBase : dadosContexto
+    }), [contextoId, contextoNormal, dadosBase, dadosContexto, nome]);
 
     useEffect(() => {
-        const idSeguro = `t_${idTerritorio}`;
-        const unsub = onSnapshot(doc(db, "territorios", idSeguro), (docSnapshot) => {
-            if (docSnapshot.exists()) {
-                const data = docSnapshot.data();
-                setDadosBanco(data);
-                setUsuarioSelecionado("");
-            } else { setDoc(docSnapshot.ref, { status: 'aberto', nome: nome, quadras_feitas: [] }); }
+        const unsubBase = onSnapshot(baseRef, (docSnapshot) => {
+            setDadosBase(docSnapshot.exists() ? docSnapshot.data() : buildBaseTerritorioDefaults(nome));
         });
-        return () => unsub();
-    }, [idTerritorio, nome]);
+
+        if (contextoNormal) {
+            return () => unsubBase();
+        }
+
+        const unsubContexto = onSnapshot(stateRef, (docSnapshot) => {
+            setDadosContexto(docSnapshot.exists() ? docSnapshot.data() : buildContextTerritorioDefaults({ idTerritorio, nome, contextoSistema }));
+        });
+
+        return () => {
+            unsubBase();
+            unsubContexto();
+        };
+    }, [baseRef, contextoNormal, contextoSistema, idTerritorio, nome, stateRef]);
+
+    useEffect(() => {
+        setUsuarioSelecionado("");
+        setMsgPronta(null);
+    }, [contextoId, idTerritorio]);
+
+    const contextoSufixo = contextoSistema?.campanhaAtiva ? ` na campanha "${contextoSistema.contextoAtivoTitulo}"` : '';
+    const stateDocSeed = useMemo(() => (
+        contextoNormal
+            ? { status: 'aberto', nome }
+            : buildContextTerritorioDefaults({ idTerritorio, nome, contextoSistema })
+    ), [contextoNormal, contextoSistema, idTerritorio, nome]);
+
+    const salvarEstadoTerritorio = async (updates) => {
+        await setDoc(stateRef, {
+            ...stateDocSeed,
+            ...updates
+        }, { merge: true });
+    };
 
     const notificarConclusao = async () => {
         if (!dadosBanco.designadoPara) return;
@@ -421,35 +451,52 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             if (!querySnapshot.empty) {
                 await addDoc(collection(db, "notificacoes"), {
                     para: "ADMINS",
-                    texto: `🏁 O Território ${nome} foi 100% concluído por ${dadosBanco.designadoNome}.`,
+                    texto: `🏁 O Território ${nome} foi 100% concluído por ${dadosBanco.designadoNome}${contextoSufixo}.`,
                     data: new Date(),
                     lida: false,
                     tipo: 'devolucao',
                     origem: 'sistema'
                 });
             }
-            alert("Parabéns! Você concluiu todas as quadras. Os administradores foram notificados.");
+            alert(`Parabéns! Você concluiu todas as quadras${contextoSufixo}. Os administradores foram notificados.`);
         } catch (error) { console.error(error); }
     };
 
+    const alternarQuadra = async (quadraId, jaFeita) => {
+        const timestampNow = new Date();
+
+        if (jaFeita) {
+            await salvarEstadoTerritorio({
+                quadras_feitas: arrayRemove(quadraId),
+                ultimaAlteracao: timestampNow
+            });
+            return;
+        }
+
+        await salvarEstadoTerritorio({
+            quadras_feitas: arrayUnion(quadraId),
+            ultimaAlteracao: timestampNow
+        });
+
+        if (feitas + 1 === total) {
+            await notificarConclusao();
+        }
+    };
+
     const adicionarNota = async (quadraId, texto) => {
-        const idSeguro = `t_${idTerritorio}`;
-        const docRef = doc(db, "territorios", idSeguro);
         const novaNota = { id: crypto.randomUUID(), texto, autorEmail: user.email, autorNome: user.displayName || user.email.split('@')[0], data: new Date().toISOString() };
-        const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
+        const notasAtuais = dadosBase.notas_quadras?.[quadraId];
         let novoArray = Array.isArray(notasAtuais) ? [...notasAtuais, novaNota] : (typeof notasAtuais === 'string' ? [{ id: 'legacy', texto: notasAtuais, autorNome: 'Sistema', data: new Date().toISOString(), autorEmail: 'sistema' }, novaNota] : [novaNota]);
 
-        // --- CORREÇÃO: ATUALIZA ULTIMA ALTERAÇÃO AO ADICIONAR NOTA ---
-        await updateDoc(docRef, {
+        await setDoc(baseRef, {
+            nome,
             [`notas_quadras.${quadraId}`]: novoArray,
             ultimaAlteracao: new Date()
-        });
+        }, { merge: true });
     };
 
     const editarNota = async (quadraId, noteId, novoTexto) => {
-        const idSeguro = `t_${idTerritorio}`;
-        const docRef = doc(db, "territorios", idSeguro);
-        const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
+        const notasAtuais = dadosBase.notas_quadras?.[quadraId];
         if (!Array.isArray(notasAtuais)) return;
         const novoArray = notasAtuais.map(n => {
             if (n.id === noteId) {
@@ -459,25 +506,26 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             return n;
         });
 
-        // --- CORREÇÃO: ATUALIZA ULTIMA ALTERAÇÃO AO EDITAR NOTA ---
-        await updateDoc(docRef, {
+        await setDoc(baseRef, {
+            nome,
             [`notas_quadras.${quadraId}`]: novoArray,
             ultimaAlteracao: new Date()
-        });
+        }, { merge: true });
     };
 
     const removerNota = async (quadraId, noteId) => {
         if (!confirm("Excluir esta mensagem?")) return;
-        const idSeguro = `t_${idTerritorio}`;
-        const docRef = doc(db, "territorios", idSeguro);
-        const notasAtuais = dadosBanco.notas_quadras?.[quadraId];
+        const notasAtuais = dadosBase.notas_quadras?.[quadraId];
 
-        const updates = { ultimaAlteracao: new Date() }; // Prepara update com data
+        const updates = { ultimaAlteracao: new Date() };
 
         if (!Array.isArray(notasAtuais)) {
             if (noteId === 'legacy') {
                 updates[`notas_quadras.${quadraId}`] = deleteField();
-                await updateDoc(docRef, updates);
+                await setDoc(baseRef, {
+                    nome,
+                    ...updates
+                }, { merge: true });
             }
             return;
         }
@@ -485,7 +533,10 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         const novoArray = notasAtuais.filter(n => n.id !== noteId);
         updates[`notas_quadras.${quadraId}`] = novoArray;
 
-        await updateDoc(docRef, updates);
+        await setDoc(baseRef, {
+            nome,
+            ...updates
+        }, { merge: true });
     };
 
     const abrirModalNota = (quadraId, notasAtuais) => {
@@ -557,14 +608,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const gerarLinkMsg = (uNome, uWhats) => {
         const baseUrl = window.location.href.split('?')[0].split('#')[0] + '#/app';
         const linkInterno = `${baseUrl}?lat=${centro.lat}&lng=${centro.lng}&z=16`;
-        const textoMsg = `Olá *${uNome}*! \nO território *${nome}* foi designado para você.\n\n *Acesse pelo App:* ${linkInterno}\n\nBom trabalho!`;
+        const tituloContexto = contextoSistema?.campanhaAtiva ? `\n*Modo:* ${contextoSistema.contextoAtivoTitulo}` : '';
+        const textoMsg = `Olá *${uNome}*! \nO território *${nome}* foi designado para você.${tituloContexto}\n\n *Acesse pelo App:* ${linkInterno}\n\nBom trabalho!`;
         return { texto: textoMsg, whatsapp: uWhats, nome: uNome };
     };
 
     const salvarDesignacao = async () => {
-        const idSeguro = `t_${idTerritorio}`;
-
-        // Bloqueia e mostra feedback
         setLoadingAction(true);
 
         try {
@@ -578,8 +627,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 const updateData = { designadoPara: null, designadoNome: null, dataDesignacao: null, cicloAtual: null, historico: arrayUnion(historico) };
                 if (isCompleto) { updateData.ultimaConclusao = new Date(); updateData.quadras_feitas = []; }
 
-                await updateDoc(doc(db, "territorios", idSeguro), updateData);
-                try { await addDoc(collection(db, "notificacoes"), { para: "ADMINS", texto: `Território ${nome} devolvido.`, data: new Date(), lida: false, tipo: 'devolucao' }); } catch (e) { }
+                await salvarEstadoTerritorio(updateData);
+                try {
+                    await addDoc(collection(db, "notificacoes"), { para: "ADMINS", texto: `Território ${nome} devolvido${contextoSufixo}.`, data: new Date(), lida: false, tipo: 'devolucao' });
+                } catch (error) {
+                    console.error("Erro ao enviar notificação de devolução:", error);
+                }
 
                 setMsgPronta(null);
                 alert("✅ Território devolvido com sucesso! Sincronizado com o servidor.");
@@ -588,10 +641,11 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
                 let novoCiclo = dadosBanco.designadoPara ? { dataInicio: dadosBanco.cicloAtual?.dataInicio, responsaveis: [...new Set([...(dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome]), novoNome])] } : { dataInicio: new Date(), responsaveis: [novoNome] };
 
-                await updateDoc(doc(db, "territorios", idSeguro), { designadoPara: usuarioSelecionado, designadoNome: novoNome, dataDesignacao: new Date(), cicloAtual: novoCiclo });
+                await salvarEstadoTerritorio({ designadoPara: usuarioSelecionado, designadoNome: novoNome, dataDesignacao: new Date(), cicloAtual: novoCiclo });
 
                 const link = `${window.location.href.split('#')[0]}#/app?lat=${centro.lat}&lng=${centro.lng}&z=16`;
-                setMsgPronta({ texto: `Olá *${novoNome}*! \nO território *${nome}* foi designado para você.\n\n *Acesse:* ${link}\n\nBom trabalho!`, whatsapp: usuarioObj?.whatsapp, nome: novoNome });
+                const contextoLinha = contextoSistema?.campanhaAtiva ? `\n *Modo:* ${contextoSistema.contextoAtivoTitulo}` : '';
+                setMsgPronta({ texto: `Olá *${novoNome}*! \nO território *${nome}* foi designado para você.${contextoLinha}\n\n *Acesse:* ${link}\n\nBom trabalho!`, whatsapp: usuarioObj?.whatsapp, nome: novoNome });
 
                 alert(`✅ Designação salva com sucesso para ${novoNome}!`);
             }
@@ -747,7 +801,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             {deveMostrarQuadras && listaQuadras.map((q, idx) => (
                 <QuadraMarker
                     key={`t-${idTerritorio}-q-${idx}`} // FIX: Usando apenas ID do território + index para garantir unicidade absoluta
-                    quadra={q} idTerritorio={idTerritorio} isFeita={dadosBanco.quadras_feitas?.includes(q.id)} podeEditar={isAdmin || isMeu} nota={dadosBanco.notas_quadras?.[q.id]} onAbrirNota={abrirModalNota} totalQuadras={total} qtdFeitas={feitas} onConclusao={notificarConclusao}
+                    quadra={q}
+                    isFeita={dadosBanco.quadras_feitas?.includes(q.id)}
+                    podeEditar={isAdmin || isMeu}
+                    nota={dadosBanco.notas_quadras?.[q.id]}
+                    onAbrirNota={abrirModalNota}
+                    onAlternarQuadra={alternarQuadra}
                 />
             ))}
             {deveMostrarQuadras && showRefs && pontosFiltrados.referencias.map((ref, idx) => (
@@ -766,13 +825,13 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs text-blue-800">{c.nome}</Tooltip>
                 </Marker>
             ))}
-            <ModalNota isOpen={modalConfig.open} dados={modalConfig.dados} user={user} isAdmin={isAdmin} onClose={fecharModal} onAdicionar={adicionarNota} onEditar={editarNota} onExcluir={removerNota} />
+            <ModalNota key={`${modalConfig.open ? 'open' : 'closed'}-${modalConfig.dados?.quadraId || 'sem-quadra'}`} isOpen={modalConfig.open} dados={modalConfig.dados} user={user} isAdmin={isAdmin} onClose={fecharModal} onAdicionar={adicionarNota} onEditar={editarNota} onExcluir={removerNota} />
         </>
     );
 };
 
 // --- MAPA PRINCIPAL ---
-const Mapa = ({ user, isAdmin }) => {
+const Mapa = ({ user, isAdmin, contextoSistema }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
     const [zoomLevel, setZoomLevel] = useState(14);
     const [listaUsuarios, setListaUsuarios] = useState([]);
@@ -783,7 +842,10 @@ const Mapa = ({ user, isAdmin }) => {
     const [showCondos, setShowCondos] = useState(true);
 
     useEffect(() => {
-        fetch('./mapa.json').then(res => res.json()).then(data => setGeoJsonData(data));
+        loadMapaData()
+            .then((data) => setGeoJsonData(data))
+            .catch((error) => console.error("Erro ao carregar mapa:", error));
+
         const carregarUsuarios = async () => {
             if (!isAdmin) return;
             try {
@@ -820,12 +882,11 @@ const Mapa = ({ user, isAdmin }) => {
                     <MarcadorUsuario posicao={posicaoUsuario} />
 
                     {geoJsonData.features.map((feature, index) => {
-                        const uniqueId = feature.properties.id || index + 1;
-                        // Chave composta para unicidade absoluta
+                        const uniqueId = getFeatureId(feature, index);
                         const uniqueKey = feature.properties.id ? `terr-${feature.properties.id}` : `terr-idx-${index}`;
                         return (
                             <TerritorioDetalhado
-                                key={uniqueKey}
+                                key={`${uniqueKey}-${contextoSistema?.contextoAtivoId || 'normal'}`}
                                 dados={feature}
                                 idTerritorio={uniqueId}
                                 zoomLevel={zoomLevel}
@@ -835,6 +896,7 @@ const Mapa = ({ user, isAdmin }) => {
                                 ocultarCores={ocultarCores}
                                 showRefs={showRefs}
                                 showCondos={showCondos}
+                                contextoSistema={contextoSistema}
                             />
                         );
                     })}

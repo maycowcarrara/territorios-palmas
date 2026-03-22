@@ -1,0 +1,82 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function estaLogado() {
+      return request.auth != null;
+    }
+
+    function meuEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function getDadosUsuario() {
+      return get(/databases/$(database)/documents/usuarios/$(meuEmail())).data;
+    }
+
+    function isAdmin() {
+      return estaLogado() &&
+             exists(/databases/$(database)/documents/usuarios/$(meuEmail())) &&
+             getDadosUsuario().role == 'admin';
+    }
+
+    function isAprovado() {
+      return estaLogado() &&
+             exists(/databases/$(database)/documents/usuarios/$(meuEmail())) &&
+             (getDadosUsuario().role == 'admin' || getDadosUsuario().role == 'comum');
+    }
+
+    match /usuarios/{email} {
+      allow read: if estaLogado() && (isAdmin() || meuEmail() == email);
+
+      allow create: if estaLogado() &&
+                    meuEmail() == email &&
+                    request.resource.data.role == 'aguardando';
+
+      allow update: if isAdmin() || (
+        estaLogado() &&
+        meuEmail() == email &&
+        request.resource.data.role == resource.data.role
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    match /territorios/{territorio} {
+      allow read: if isAprovado();
+      allow update: if isAprovado();
+      allow create, delete: if isAdmin();
+    }
+
+    match /territorios_contexto/{territorioContexto} {
+      allow read: if isAprovado();
+      allow create, update: if isAprovado();
+      allow delete: if isAdmin();
+    }
+
+    match /configuracoes/{docId} {
+      allow read: if isAprovado();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /campanhas/{campanhaId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /notificacoes/{notificacao} {
+      allow read: if estaLogado() && (
+        resource.data.para == meuEmail() ||
+        (resource.data.para == 'ADMINS' && isAdmin())
+      );
+
+      allow create: if estaLogado();
+
+      allow delete: if estaLogado() && (
+        resource.data.para == meuEmail() ||
+        (resource.data.para == 'ADMINS' && isAdmin())
+      );
+    }
+  }
+}
