@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
 import { useSistema } from './useSistema';
 import { getDefaultSistemaConfig, getSistemaTheme, slugifyCampanha } from './sistema';
+import { getTerritorioContextCollectionRef } from './territorioContext';
 
 const AdminPanel = () => {
     const [usuarios, setUsuarios] = useState([]);
@@ -11,6 +12,11 @@ const AdminPanel = () => {
     const [campanhaTitulo, setCampanhaTitulo] = useState('');
     const [campanhaSlug, setCampanhaSlug] = useState('');
     const [salvandoCampanha, setSalvandoCampanha] = useState(false);
+    const [campanhaParaExcluir, setCampanhaParaExcluir] = useState(null);
+    const [confirmacaoExclusao, setConfirmacaoExclusao] = useState('');
+    const [carregandoResumoExclusao, setCarregandoResumoExclusao] = useState(false);
+    const [registrosCampanhaParaExcluir, setRegistrosCampanhaParaExcluir] = useState(0);
+    const [excluindoCampanha, setExcluindoCampanha] = useState(false);
     const { config: contextoSistema } = useSistema();
     const temaSistema = getSistemaTheme(contextoSistema);
 
@@ -61,6 +67,49 @@ const AdminPanel = () => {
 
         return () => unsub();
     }, []);
+
+    useEffect(() => {
+        let ativo = true;
+
+        const carregarResumoExclusao = async () => {
+            if (!campanhaParaExcluir) {
+                setConfirmacaoExclusao('');
+                setRegistrosCampanhaParaExcluir(0);
+                setCarregandoResumoExclusao(false);
+                return;
+            }
+
+            setConfirmacaoExclusao('');
+            setCarregandoResumoExclusao(true);
+
+            try {
+                const contextoQuery = query(
+                    getTerritorioContextCollectionRef(db),
+                    where("contextoId", "==", campanhaParaExcluir.id)
+                );
+                const snapshot = await getDocs(contextoQuery);
+
+                if (ativo) {
+                    setRegistrosCampanhaParaExcluir(snapshot.size);
+                }
+            } catch (error) {
+                console.error("Erro ao carregar resumo da campanha para exclusão:", error);
+                if (ativo) {
+                    setRegistrosCampanhaParaExcluir(0);
+                }
+            } finally {
+                if (ativo) {
+                    setCarregandoResumoExclusao(false);
+                }
+            }
+        };
+
+        carregarResumoExclusao();
+
+        return () => {
+            ativo = false;
+        };
+    }, [campanhaParaExcluir]);
 
     // --- ADICIONAR NOVO ---
     const handleAdicionar = async (e) => {
@@ -234,6 +283,64 @@ const AdminPanel = () => {
         }
     };
 
+    const abrirModalExclusaoCampanha = (campanha) => {
+        setCampanhaParaExcluir(campanha);
+    };
+
+    const fecharModalExclusaoCampanha = (forcar = false) => {
+        if (excluindoCampanha && !forcar) return;
+        setCampanhaParaExcluir(null);
+        setConfirmacaoExclusao('');
+        setRegistrosCampanhaParaExcluir(0);
+        setCarregandoResumoExclusao(false);
+    };
+
+    const excluirCampanha = async () => {
+        if (!campanhaParaExcluir) return;
+
+        if (contextoSistema.contextoAtivoId === campanhaParaExcluir.id) {
+            alert("Desative a campanha antes de excluir.");
+            return;
+        }
+
+        if (confirmacaoExclusao.trim() !== campanhaParaExcluir.id) {
+            alert("Digite o identificador exato da campanha para confirmar a exclusão.");
+            return;
+        }
+
+        setExcluindoCampanha(true);
+
+        try {
+            const campanhaExcluida = campanhaParaExcluir;
+            const contextoQuery = query(
+                getTerritorioContextCollectionRef(db),
+                where("contextoId", "==", campanhaParaExcluir.id)
+            );
+            const contextoSnapshot = await getDocs(contextoQuery);
+            const refsParaExcluir = [
+                ...contextoSnapshot.docs.map((docSnapshot) => docSnapshot.ref),
+                doc(db, "campanhas", campanhaParaExcluir.id)
+            ];
+
+            const batchSize = 400;
+            for (let index = 0; index < refsParaExcluir.length; index += batchSize) {
+                const batch = writeBatch(db);
+                refsParaExcluir
+                    .slice(index, index + batchSize)
+                    .forEach((docRef) => batch.delete(docRef));
+                await batch.commit();
+            }
+
+            fecharModalExclusaoCampanha(true);
+            alert(`✅ Campanha "${campanhaExcluida.titulo || campanhaExcluida.id}" excluída com sucesso.`);
+        } catch (error) {
+            console.error("Erro ao excluir campanha:", error);
+            alert("❌ Não foi possível excluir a campanha.");
+        } finally {
+            setExcluindoCampanha(false);
+        }
+    };
+
     // --- CONTADORES ---
     const totalUsers = usuarios.length;
     const totalAdmins = usuarios.filter(u => u.role === 'admin').length;
@@ -397,7 +504,22 @@ const AdminPanel = () => {
                                                             Desativar Agora
                                                         </button>
                                                     )}
+                                                    {!ativa && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => abrirModalExclusaoCampanha(campanha)}
+                                                            disabled={salvandoCampanha || excluindoCampanha}
+                                                            className="w-full rounded-lg border border-red-200 bg-white py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                                        >
+                                                            Excluir Campanha
+                                                        </button>
+                                                    )}
                                                 </div>
+                                                {ativa && (
+                                                    <p className="mt-3 text-xs text-violet-700">
+                                                        Para excluir esta campanha, desative primeiro o modo campanha.
+                                                    </p>
+                                                )}
                                             </div>
                                         );
                                     })}
@@ -712,6 +834,85 @@ const AdminPanel = () => {
                     )}
                 </div>
             </div>
+
+            {campanhaParaExcluir && (
+                <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={fecharModalExclusaoCampanha}>
+                    <div className="w-full max-w-lg rounded-2xl border border-red-100 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-start justify-between gap-4 border-b border-red-100 bg-red-50 px-6 py-4">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-[0.2em] text-red-500">Exclusão definitiva</p>
+                                <h3 className="mt-1 text-xl font-extrabold text-red-700">
+                                    Excluir campanha "{campanhaParaExcluir.titulo || campanhaParaExcluir.id}"
+                                </h3>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={fecharModalExclusaoCampanha}
+                                disabled={excluindoCampanha}
+                                className="rounded-lg px-2 py-1 text-red-400 hover:bg-white hover:text-red-600 disabled:opacity-50"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="space-y-5 px-6 py-5">
+                            <p className="text-sm leading-relaxed text-gray-600">
+                                Essa ação apaga a campanha cadastrada e todo o progresso salvo nela. Não existe restauração automática depois da exclusão.
+                            </p>
+
+                            <div className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 md:grid-cols-2">
+                                <div>
+                                    <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Título</p>
+                                    <p className="mt-1 font-bold text-gray-800">{campanhaParaExcluir.titulo || campanhaParaExcluir.id}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Identificador</p>
+                                    <p className="mt-1 font-mono text-xs text-gray-600">{campanhaParaExcluir.id}</p>
+                                </div>
+                                <div className="md:col-span-2">
+                                    <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Registros de progresso vinculados</p>
+                                    <p className="mt-1 font-bold text-gray-800">
+                                        {carregandoResumoExclusao ? 'Carregando...' : `${registrosCampanhaParaExcluir} registro(s) em territorios_contexto`}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-gray-500">
+                                    Digite <span className="rounded bg-red-100 px-1.5 py-0.5 font-mono text-red-700">{campanhaParaExcluir.id}</span> para confirmar
+                                </label>
+                                <input
+                                    type="text"
+                                    value={confirmacaoExclusao}
+                                    onChange={(e) => setConfirmacaoExclusao(e.target.value)}
+                                    placeholder="Confirme o identificador"
+                                    className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none transition-all focus:border-red-400 focus:ring-2 focus:ring-red-200"
+                                    disabled={excluindoCampanha}
+                                />
+                            </div>
+
+                            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                                <button
+                                    type="button"
+                                    onClick={fecharModalExclusaoCampanha}
+                                    disabled={excluindoCampanha}
+                                    className="rounded-lg border border-gray-300 px-4 py-2.5 font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={excluirCampanha}
+                                    disabled={excluindoCampanha || carregandoResumoExclusao || confirmacaoExclusao.trim() !== campanhaParaExcluir.id}
+                                    className="rounded-lg bg-red-600 px-4 py-2.5 font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                                >
+                                    {excluindoCampanha ? 'Excluindo...' : 'Excluir definitivamente'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

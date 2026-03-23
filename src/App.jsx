@@ -202,22 +202,60 @@ const SininhoNotificacoes = ({ user, isAdmin }) => {
 };
 
 // --- MODAL MEUS TERRITÓRIOS ---
-const SistemaChip = ({ contextoSistema, compact = false, coberturaCampanha = null, carregandoCobertura = false }) => {
+const SistemaChip = ({ contextoSistema, compact = false, coberturaCampanha = null, carregandoCobertura = false, stacked = false, coverageOnly = false }) => {
   if (!contextoSistema?.campanhaAtiva) return null;
+
+  const coberturaBadge = carregandoCobertura ? (
+    <span className="rounded-full bg-violet-950/35 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-violet-100">
+      ...
+    </span>
+  ) : coberturaCampanha ? (
+    <span className="rounded-full bg-violet-950/35 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-violet-100 whitespace-nowrap">
+      {coberturaCampanha.percentualCoberto}% coberto
+    </span>
+  ) : null;
+
+  if (coverageOnly) {
+    if (carregandoCobertura) {
+      return (
+        <span className="inline-flex items-center rounded-full bg-violet-950/35 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-violet-100">
+          ...
+        </span>
+      );
+    }
+
+    if (coberturaCampanha) {
+      return (
+        <span className="inline-flex items-center rounded-full bg-violet-950/35 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-violet-100">
+          {coberturaCampanha.percentualCoberto}%
+        </span>
+      );
+    }
+
+    return null;
+  }
+
+  if (stacked) {
+    return (
+      <span className="flex max-w-full flex-col rounded-2xl border border-violet-200/35 bg-violet-900/45 px-2.5 py-1.5 text-violet-50 shadow-sm">
+        <span className="flex min-w-0 items-center gap-2 text-[11px] font-bold leading-tight">
+          <span className="shrink-0">📢</span>
+          <span className="truncate">{contextoSistema.contextoAtivoTitulo}</span>
+        </span>
+        {coberturaBadge ? (
+          <span className="mt-1 pl-5">
+            {coberturaBadge}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
 
   return (
     <span className={`inline-flex items-center gap-2 rounded-full border px-2 py-1 font-bold ${compact ? 'text-[10px]' : 'text-xs'} bg-violet-900/45 text-violet-50 border-violet-200/35`}>
       <span>📢</span>
       <span className="truncate max-w-[180px]">{contextoSistema.contextoAtivoTitulo}</span>
-      {carregandoCobertura ? (
-        <span className="rounded-full bg-violet-950/35 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-violet-100">
-          ...
-        </span>
-      ) : coberturaCampanha ? (
-        <span className="rounded-full bg-violet-950/35 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-violet-100 whitespace-nowrap">
-          {coberturaCampanha.percentualCoberto}% coberto
-        </span>
-      ) : null}
+      {coberturaBadge}
     </span>
   );
 };
@@ -659,22 +697,22 @@ function Dashboard() {
       />
 
       {/* CABEÇALHO */}
-      <div className={`h-16 ${temaSistema.headerBg} text-white shadow-md z-20 px-4 flex items-center justify-between flex-shrink-0`}>
+      <div className={`h-16 ${temaSistema.headerBg} text-white shadow-md z-20 px-2.5 sm:px-4 flex items-center justify-between flex-shrink-0`}>
         
         {/* LADO ESQUERDO: LOGO (Mobile) vs TÍTULO (Desktop) */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           {/* Logo: Visível no mobile (sm:hidden esconde em telas maiores) */}
           <img 
             src="./icon-192.png" 
             alt="Logo" 
             className={`h-9 w-9 rounded-lg shadow-sm ${temaSistema.headerBorder} border sm:hidden`} 
           />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <span className="text-xl font-bold tracking-wide hidden sm:block">Territórios</span>
             <div className="sm:hidden">
               <SistemaChip
                 contextoSistema={contextoSistema}
-                compact
+                coverageOnly
                 coberturaCampanha={coberturaCampanha}
                 carregandoCobertura={coberturaCampanha.loading}
               />
@@ -690,13 +728,13 @@ function Dashboard() {
         </div>
 
         {/* LADO DIREITO: ÍCONES E BOTÕES */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="ml-1.5 sm:ml-3 flex shrink-0 items-center gap-1 sm:gap-3">
           
           {/* ATALHO 1: RELATÓRIOS (SÓ ADMIN) - Sempre visível agora */}
           {isAdmin && (
             <button
               onClick={() => navigate('/relatorios')}
-              className={`p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
+              className={`p-1.5 sm:p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
               title="Relatórios"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -709,7 +747,7 @@ function Dashboard() {
           {!isAdmin && (
             <button
               onClick={() => setAjudaAberta(true)}
-              className={`p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
+              className={`p-1.5 sm:p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
               title="Como Usar"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -722,7 +760,7 @@ function Dashboard() {
 
           <button
             onClick={() => setMeusTerritoriosAberto(true)}
-            className={`flex items-center gap-1 px-3 py-1.5 ${temaSistema.headerSoft} ${temaSistema.headerSoftHover} rounded-full shadow-sm text-sm font-semibold transition-colors active:scale-95 ${temaSistema.headerBorder} border`}
+            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 ${temaSistema.headerSoft} ${temaSistema.headerSoftHover} rounded-full shadow-sm text-sm font-semibold transition-colors active:scale-95 ${temaSistema.headerBorder} border`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
@@ -732,7 +770,7 @@ function Dashboard() {
 
           <button
             onClick={() => setMenuAberto(true)}
-            className={`p-1 ${temaSistema.headerHover} rounded transition-colors ml-1`}
+            className={`p-1 ${temaSistema.headerHover} rounded transition-colors ml-0.5 sm:ml-1`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
