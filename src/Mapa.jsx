@@ -8,9 +8,11 @@ import { getFeatureId } from './mapaUtils';
 import {
     buildBaseTerritorioDefaults,
     buildContextTerritorioDefaults,
+    getTerritorioProgresso,
     getTerritorioBaseRef,
     getTerritorioStateRef,
-    mergeTerritorioData
+    mergeTerritorioData,
+    TERRITORIO_STATUS
 } from './territorioContext';
 import { isNormalContext } from './sistema';
 import L from 'leaflet';
@@ -21,6 +23,7 @@ const cssTooltip = `
   .label-nome { font-weight: 700; font-size: 14px; color: #1e3a8a; text-shadow: 2px 0 #fff, -2px 0 #fff, 0 2px #fff, 0 -2px #fff, 1px 1px #fff, -1px -1px #fff; display: block; font-stretch: condensed; letter-spacing: -0.5px; margin-bottom: 2px; white-space: normal; max-width: 140px; margin-left: auto; margin-right: auto; }
   .label-status { font-size: 11px; font-weight: 700; color: #444; text-shadow: 1px 1px 0px rgba(255,255,255,0.9); background-color: rgba(255,255,255,0.7); padding: 1px 6px; border-radius: 8px; display: inline-block; }
   .label-tempo { display: block; font-size: 10px; font-weight: 800; color: #7f1d1d; margin-top: 2px; text-shadow: 1px 1px 0px rgba(255,255,255,0.8); text-transform: uppercase; }
+  .label-tempo-compacto { display: inline-block; font-size: 9px; font-weight: 800; color: #7c2d12; margin-top: 1px; padding: 1px 5px; border-radius: 999px; background: rgba(255,255,255,0.72); border: 1px solid rgba(194, 65, 12, 0.18); text-shadow: 1px 1px 0px rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 0.2px; }
   .sem-fundo { background: transparent; border: none; box-shadow: none; }
   
   .map-layer-btn { width: 48px; height: 48px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s, border-color 0.2s; overflow: hidden; position: relative; background-size: cover; }
@@ -443,22 +446,37 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         }, { merge: true });
     };
 
-    const notificarConclusao = async () => {
+    const finalizarTerritorio = async () => {
         if (!dadosBanco.designadoPara) return;
         try {
+            const ciclo = dadosBanco.cicloAtual || { dataInicio: dadosBanco.dataDesignacao || new Date(), responsaveis: [dadosBanco.designadoNome] };
+            const historico = { ...ciclo, dataTermino: new Date(), responsaveis: [...new Set([...(ciclo.responsaveis || []), dadosBanco.designadoNome])] };
+
+            await salvarEstadoTerritorio({
+                designadoPara: null,
+                designadoNome: null,
+                dataDesignacao: null,
+                cicloAtual: null,
+                historico: arrayUnion(historico),
+                ultimaConclusao: new Date(),
+                quadras_feitas: [],
+                status: TERRITORIO_STATUS.FINALIZADO,
+                ultimaAlteracao: new Date()
+            });
+
             const q = query(collection(db, "usuarios"), where("role", "==", "admin"));
             const querySnapshot = await getDocs(q);
             if (!querySnapshot.empty) {
                 await addDoc(collection(db, "notificacoes"), {
                     para: "ADMINS",
-                    texto: `🏁 O Território ${nome} foi 100% concluído por ${dadosBanco.designadoNome}${contextoSufixo}.`,
+                    texto: `🏁 O Território ${nome} foi finalizado por ${dadosBanco.designadoNome}${contextoSufixo}.`,
                     data: new Date(),
                     lida: false,
-                    tipo: 'devolucao',
+                    tipo: 'conclusao',
                     origem: 'sistema'
                 });
             }
-            alert(`Parabéns! Você concluiu todas as quadras${contextoSufixo}. Os administradores foram notificados.`);
+            alert(`Parabéns! Você finalizou o território${contextoSufixo}. Solicite um novo ao Servo de Territórios com antecedência. Os administradores foram notificados.`);
         } catch (error) { console.error(error); }
     };
 
@@ -466,20 +484,38 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         const timestampNow = new Date();
 
         if (jaFeita) {
-            await salvarEstadoTerritorio({
+            const updates = {
                 quadras_feitas: arrayRemove(quadraId),
                 ultimaAlteracao: timestampNow
-            });
+            };
+
+            if (dadosBanco.status !== TERRITORIO_STATUS.ABERTO) {
+                updates.status = TERRITORIO_STATUS.ABERTO;
+            }
+
+            await salvarEstadoTerritorio(updates);
             return;
         }
 
         await salvarEstadoTerritorio({
             quadras_feitas: arrayUnion(quadraId),
-            ultimaAlteracao: timestampNow
+            ultimaAlteracao: timestampNow,
+            status: TERRITORIO_STATUS.ABERTO
         });
 
         if (feitas + 1 === total) {
-            await notificarConclusao();
+            const confirmouFinalizacao = confirm(`Você finalizou o território${contextoSufixo}?`);
+
+            if (confirmouFinalizacao) {
+                await finalizarTerritorio();
+                return;
+            }
+
+            await salvarEstadoTerritorio({
+                status: TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO,
+                ultimaAlteracao: new Date()
+            });
+            alert("Tudo certo. O território continua com você e ficará como 100% concluído, aguardando sua confirmação final.");
         }
     };
 
@@ -551,9 +587,11 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const donoDoTerritorio = dadosBanco.designadoPara;
     const isMeu = donoDoTerritorio === usuarioAtual;
     const isOcupado = donoDoTerritorio && !isMeu;
-    const isCompleto = listaQuadras.length > 0 && dadosBanco.quadras_feitas?.length === listaQuadras.length;
-    const feitas = dadosBanco.quadras_feitas?.length || 0;
     const total = listaQuadras.length;
+    const progressoTerritorio = getTerritorioProgresso(dadosBanco, total);
+    const isFinalizado = progressoTerritorio.isFinalizado;
+    const isAguardandoFinalizacao = progressoTerritorio.isAguardandoFinalizacao;
+    const feitas = progressoTerritorio.quadrasFeitasExibicao;
 
     // --- CÁLCULO DA PORCENTAGEM (PARA O TOOLTIP) ---
     const porcentagem = total > 0 ? (feitas / total) * 100 : 0;
@@ -568,10 +606,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     let diasSemTrabalhar = 0;
     let textoTempo = "Nunca";
+    let textoTempoCompacto = "Nunca";
     if (dadosBanco.ultimaConclusao) {
         const dataUltima = dadosBanco.ultimaConclusao.toDate ? dadosBanco.ultimaConclusao.toDate() : new Date(dadosBanco.ultimaConclusao);
         diasSemTrabalhar = Math.ceil(Math.abs(new Date() - dataUltima) / (1000 * 60 * 60 * 24));
         textoTempo = diasSemTrabalhar > 60 ? `${Math.floor(diasSemTrabalhar / 30)} meses` : `${diasSemTrabalhar} dias`;
+        textoTempoCompacto = diasSemTrabalhar > 60 ? `${Math.floor(diasSemTrabalhar / 30)}m` : `${diasSemTrabalhar}d`;
     }
 
     // --- CORES ATUALIZADAS (TONS DE LARANJA) ---
@@ -581,8 +621,11 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     let opacidade = 0.5;
     let opacidadeBorda = 1;
 
-    if (isCompleto) {
+    if (isFinalizado) {
         corPreenchimento = '#22c55e'; corBorda = '#15803d'; opacidade = 0.6; if (isMeu) pesoBorda = 3;
+    }
+    else if (isAguardandoFinalizacao) {
+        corPreenchimento = '#facc15'; corBorda = '#ca8a04'; opacidade = 0.65; if (isMeu) pesoBorda = 3;
     }
     else if (isMeu) {
         corPreenchimento = '#3b82f6'; corBorda = '#1e40af'; pesoBorda = 3; if (isAdmin) { corPreenchimento = '#a855f7'; corBorda = '#6b21a8'; }
@@ -624,8 +667,19 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 }
                 const ciclo = dadosBanco.cicloAtual || { dataInicio: dadosBanco.dataDesignacao || new Date(), responsaveis: [dadosBanco.designadoNome] };
                 const historico = { ...ciclo, dataTermino: new Date(), responsaveis: [...new Set([...(ciclo.responsaveis || []), dadosBanco.designadoNome])] };
-                const updateData = { designadoPara: null, designadoNome: null, dataDesignacao: null, cicloAtual: null, historico: arrayUnion(historico) };
-                if (isCompleto) { updateData.ultimaConclusao = new Date(); updateData.quadras_feitas = []; }
+                const updateData = {
+                    designadoPara: null,
+                    designadoNome: null,
+                    dataDesignacao: null,
+                    cicloAtual: null,
+                    historico: arrayUnion(historico),
+                    status: TERRITORIO_STATUS.ABERTO,
+                    ultimaAlteracao: new Date()
+                };
+
+                if (dadosBanco.status === TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO) {
+                    updateData.quadras_feitas = [];
+                }
 
                 await salvarEstadoTerritorio(updateData);
                 try {
@@ -641,7 +695,14 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
                 let novoCiclo = dadosBanco.designadoPara ? { dataInicio: dadosBanco.cicloAtual?.dataInicio, responsaveis: [...new Set([...(dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome]), novoNome])] } : { dataInicio: new Date(), responsaveis: [novoNome] };
 
-                await salvarEstadoTerritorio({ designadoPara: usuarioSelecionado, designadoNome: novoNome, dataDesignacao: new Date(), cicloAtual: novoCiclo });
+                await salvarEstadoTerritorio({
+                    designadoPara: usuarioSelecionado,
+                    designadoNome: novoNome,
+                    dataDesignacao: new Date(),
+                    cicloAtual: novoCiclo,
+                    status: TERRITORIO_STATUS.ABERTO,
+                    ultimaAlteracao: new Date()
+                });
 
                 const link = `${window.location.href.split('#')[0]}#/app?lat=${centro.lat}&lng=${centro.lng}&z=16`;
                 const contextoLinha = contextoSistema?.campanhaAtiva ? `\n *Modo:* ${contextoSistema.contextoAtivoTitulo}` : '';
@@ -652,6 +713,24 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         } catch (error) {
             console.error("Erro ao salvar:", error);
             alert("❌ ERRO AO SALVAR: Verifique sua conexão com a internet e tente novamente. A alteração NÃO foi salva.");
+        } finally {
+            setLoadingAction(false);
+        }
+    };
+
+    const disponibilizarNovamente = async () => {
+        if (!confirm("Remover o status de finalizado e deixar este território disponível novamente?")) return;
+
+        setLoadingAction(true);
+        try {
+            await salvarEstadoTerritorio({
+                status: TERRITORIO_STATUS.ABERTO,
+                ultimaAlteracao: new Date()
+            });
+            alert("✅ Território liberado novamente para trabalho.");
+        } catch (error) {
+            console.error("Erro ao reabrir território:", error);
+            alert("❌ Não foi possível liberar o território novamente.");
         } finally {
             setLoadingAction(false);
         }
@@ -701,8 +780,15 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                         </div>
                         <div className="mb-3">
                             <div className="flex justify-between text-xs text-gray-600 mb-1 font-medium"><span>{feitas} de {total} quadras</span><span>{Math.round(porcentagem)}%</span></div>
-                            <div className="w-full bg-gray-200 rounded-full h-2 border border-gray-300 overflow-hidden"><div className={`h-full transition-all duration-500 ${isCompleto ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${porcentagem}%` }}></div></div>
+                            <div className="w-full bg-gray-200 rounded-full h-2 border border-gray-300 overflow-hidden"><div className={`h-full transition-all duration-500 ${isFinalizado ? 'bg-green-500' : isAguardandoFinalizacao ? 'bg-yellow-400' : 'bg-blue-600'}`} style={{ width: `${porcentagem}%` }}></div></div>
                         </div>
+                        {(isFinalizado || isAguardandoFinalizacao) && (
+                            <div className={`mb-3 rounded-lg border px-3 py-2 text-xs font-bold text-center ${isFinalizado ? 'border-green-200 bg-green-50 text-green-700' : 'border-yellow-200 bg-yellow-50 text-yellow-700'}`}>
+                                {isFinalizado
+                                    ? 'Território finalizado e aguardando nova liberação.'
+                                    : 'Território 100% concluído, aguardando confirmação final.'}
+                            </div>
+                        )}
                         {isAdmin ? (
                             <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                                 {msgPronta ? (
@@ -756,6 +842,11 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                                 !dadosBanco.designadoPara && !usuarioSelecionado ? "Já está Livre" : !usuarioSelecionado ? "Devolver" : "Salvar"
                                             )}
                                         </button>
+                                        {isFinalizado && !dadosBanco.designadoPara && (
+                                            <button onClick={disponibilizarNovamente} disabled={loadingAction} className="popup-btn-action bg-amber-50 border border-amber-300 text-amber-700 hover:bg-amber-100 mt-2">
+                                                Disponibilizar Novamente
+                                            </button>
+                                        )}
                                         {donoDoTerritorio && <button onClick={compartilharDiretamente} disabled={loadingAction} className="popup-btn-action bg-white border border-green-600 text-green-700 hover:bg-green-50 text-xs py-1 mt-2">Compartilhar Novamente</button>}
                                         {isMeu && <button onClick={compartilharPontoEncontro} className="popup-btn-action bg-green-600 text-white mt-2">Ponto de Encontro</button>}
                                     </div>
@@ -772,9 +863,14 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 {zoomLevel >= 14 && !ocultarCores && (
                     <Tooltip permanent direction="center" className="label-territorio">
                         <span className="label-nome">{zoomLevel < 16 ? codigoTerritorio : nome}</span>
+                        {zoomLevel < 16 && !isOcupado && !isFinalizado && !isAguardandoFinalizacao && (
+                            <span className="label-tempo-compacto" title={dadosBanco.ultimaConclusao ? `Última conclusão: ${textoTempo} atrás` : 'Território ainda não trabalhado'}>
+                                {textoTempoCompacto}
+                            </span>
+                        )}
                         {zoomLevel >= 16 && podeVerDetalhes && (
                             <>
-                                {!isOcupado && !isCompleto && (<><span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca"}</span><span className="label-tempo">{textoTempo}</span></>)}
+                                {!isOcupado && !isFinalizado && !isAguardandoFinalizacao && (<><span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca"}</span><span className="label-tempo">{textoTempo}</span></>)}
                                 {isOcupado && (
                                     <span
                                         className="label-status"
@@ -790,7 +886,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                         {nomeResponsavelCurto}
                                     </span>
                                 )}
-                                {isCompleto && <span className="label-status" style={{ color: '#166534', background: '#dcfce7' }}>Feito!</span>}
+                                {isAguardandoFinalizacao && <span className="label-status" style={{ color: '#854d0e', background: '#fef3c7' }}>Aguardando finalização</span>}
+                                {isFinalizado && <span className="label-status" style={{ color: '#166534', background: '#dcfce7' }}>Feito!</span>}
                             </>
                         )}
                     </Tooltip>

@@ -3,19 +3,19 @@ import { HashRouter, Routes, Route, useNavigate, Navigate } from 'react-router-d
 import { signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, googleProvider, db } from './firebase';
 import { collection, query, where, getDocs, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
-import Mapa from './Mapa';
 import { useUsuario } from './useUsuario';
 import appInfo from './version.json';
 import AutoUpdate from './AutoUpdate';
 import { checkForUpdate } from './updateUtils';
 import AjudaModal from './AjudaModal';
 import { loadMapaData } from './mapData';
-import { buildFeatureIndex, getFeatureBoundsStr } from './mapaUtils';
+import { buildFeatureIndex, getFeatureBoundsStr, getTerritorioQuadrasCount } from './mapaUtils';
 import { useSistema } from './useSistema';
 import { getSistemaTheme, isNormalContext } from './sistema';
-import { getTerritorioContextCollectionRef } from './territorioContext';
+import { getTerritorioContextCollectionRef, getTerritorioProgresso } from './territorioContext';
 import { useCoberturaCampanha } from './useCoberturaCampanha';
 
+const Mapa = lazy(() => import('./Mapa'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
 const Relatorios = lazy(() => import('./Relatorios'));
 
@@ -262,6 +262,7 @@ const SistemaChip = ({ contextoSistema, compact = false, coberturaCampanha = nul
 
 const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema }) => {
   const [lista, setLista] = useState([]);
+  const [carregando, setCarregando] = useState(false);
   const temaSistema = getSistemaTheme(contextoSistema);
 
   useEffect(() => {
@@ -270,6 +271,10 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
     let ativo = true;
 
     const carregarMeusTerritorios = async () => {
+      if (ativo) {
+        setCarregando(true);
+      }
+
       try {
         const meusDocs = [];
 
@@ -297,18 +302,60 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
             const numeroId = territorioDoc.territorioNumero || parseInt(String(territorioDoc.id).replace(/.*t_/, ''));
             const feature = featureMap.get(numeroId);
             const boundsStr = getFeatureBoundsStr(feature);
+            const totalQuadras = getTerritorioQuadrasCount(feature);
+            const progresso = getTerritorioProgresso(territorioDoc, totalQuadras);
+            const quadrasFeitas = progresso.quadrasFeitasExibicao;
+            const quadrasRestantes = Math.max(totalQuadras - quadrasFeitas, 0);
+            const percentual = progresso.percentualExibicao;
+
+            let statusResumo = 'Em andamento';
+            let descricaoResumo = `${quadrasRestantes} quadra${quadrasRestantes === 1 ? '' : 's'} faltando`;
+            let barraClasse = 'bg-blue-600';
+            let badgeClasse = 'bg-amber-100 text-amber-700';
+
+            if (progresso.isAguardandoFinalizacao) {
+              statusResumo = 'Aguardando finalização';
+              descricaoResumo = 'Todas as quadras marcadas; falta confirmar a finalização';
+              barraClasse = 'bg-yellow-400';
+              badgeClasse = 'bg-yellow-100 text-yellow-700';
+            } else if (progresso.isFinalizado) {
+              statusResumo = 'Finalizado';
+              descricaoResumo = 'Território encerrado e aguardando nova liberação';
+              barraClasse = 'bg-green-500';
+              badgeClasse = 'bg-green-100 text-green-700';
+            }
 
             let dataFormatada = "Data desc.";
+            let dataDesignacaoOrdenacao = 0;
             if (territorioDoc.dataDesignacao) {
               const d = territorioDoc.dataDesignacao.toDate ? territorioDoc.dataDesignacao.toDate() : new Date(territorioDoc.dataDesignacao);
               dataFormatada = d.toLocaleDateString('pt-BR');
+              dataDesignacaoOrdenacao = d.getTime();
             }
 
-            return { ...territorioDoc, numeroId, boundsStr, dataFormatada };
+            return {
+              ...territorioDoc,
+              numeroId,
+              boundsStr,
+              dataFormatada,
+              dataDesignacaoOrdenacao,
+              totalQuadras,
+              quadrasFeitas,
+              quadrasRestantes,
+              percentual,
+              statusResumo,
+              descricaoResumo,
+              barraClasse,
+              badgeClasse
+            };
           });
         }
 
-        listaCompleta.sort((a, b) => a.numeroId - b.numeroId);
+        listaCompleta.sort((a, b) => {
+          const diffTempo = a.dataDesignacaoOrdenacao - b.dataDesignacaoOrdenacao;
+          if (diffTempo !== 0) return diffTempo;
+          return a.numeroId - b.numeroId;
+        });
         if (ativo) {
           setLista(listaCompleta);
         }
@@ -316,6 +363,10 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
         console.error(error);
         if (ativo) {
           setLista([]);
+        }
+      } finally {
+        if (ativo) {
+          setCarregando(false);
         }
       }
     };
@@ -357,7 +408,12 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
           <button onClick={onClose} className="text-white/80 hover:text-white font-bold text-xl px-2">✕</button>
         </div>
         <div className="overflow-y-auto p-4 flex-1">
-          {lista.length === 0 ? (
+          {carregando ? (
+            <div className="py-10 flex flex-col items-center justify-center text-gray-500">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <p className="mt-3 text-sm font-medium">Carregando seus territórios...</p>
+            </div>
+          ) : lista.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <p className="mb-2 text-4xl">🤷‍♂️</p>
               <p>Nenhum território designado para você no momento.</p>
@@ -365,6 +421,9 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
             </div>
           ) : (
             <div className="space-y-3">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                Ordenado dos territórios mais antigos para os mais recentes.
+              </div>
               {lista.map((t) => (
                 <div key={t.id} className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex justify-between items-start mb-2">
@@ -373,6 +432,26 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
                       <p className="text-xs text-gray-500">Recebido em: <span className="font-medium text-gray-700">{t.dataFormatada}</span></p>
                     </div>
                     <div className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">#{t.numeroId}</div>
+                  </div>
+                  <div className="mb-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                    <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-gray-600">
+                      <span>{t.quadrasFeitas} de {t.totalQuadras} quadras</span>
+                      <span>{t.percentual}%</span>
+                    </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-gray-200">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${t.barraClasse}`}
+                        style={{ width: `${t.percentual}%` }}
+                      ></div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between text-xs">
+                      <span className="font-medium text-gray-600">
+                        {t.descricaoResumo}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 font-bold ${t.badgeClasse}`}>
+                        {t.statusResumo}
+                      </span>
+                    </div>
                   </div>
                   <button onClick={() => irParaMapa(t)} className="w-full bg-blue-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 active:scale-95 transition-transform">
                     Ir para o Mapa
@@ -398,11 +477,16 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 font-bold text-xl px-2">✕</button>
         </div>
         <div className="space-y-4">
-          <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-orange-500 border border-orange-700 opacity-60 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Disponível</p><p className="text-gray-500 text-xs">Fale com o Servo</p></div></div>
+          <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-orange-100 border border-orange-300 opacity-90 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Disponível Recente</p><p className="text-gray-500 text-xs">Trabalhado há menos tempo</p></div></div>
+          <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-orange-500 border border-orange-700 opacity-70 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Disponível Antigo</p><p className="text-gray-500 text-xs">Quanto mais escuro, mais tempo parado</p></div></div>
           <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-blue-500 border border-blue-800 opacity-60 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Seu Território</p><p className="text-gray-500 text-xs">Em andamento</p></div></div>
           {isAdmin && <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-purple-500 border border-purple-800 opacity-60 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Seu (Admin)</p><p className="text-gray-500 text-xs">Designado para você</p></div></div>}
-          <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-green-500 border border-green-800 opacity-60 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Concluído</p><p className="text-gray-500 text-xs">Todas as quadras feitas</p></div></div>
+          <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-yellow-400 border border-yellow-700 opacity-70 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Aguardando Finalização</p><p className="text-gray-500 text-xs">100% marcado, mas ainda com o dirigente</p></div></div>
+          <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-green-500 border border-green-800 opacity-60 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Finalizado</p><p className="text-gray-500 text-xs">Território encerrado oficialmente</p></div></div>
           <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-gray-500 border border-gray-700 opacity-30 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Ocupado</p><p className="text-gray-500 text-xs">Outro dirigente cuidando</p></div></div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+            No zoom mais longe, abaixo do código do território aparece há quanto tempo ele foi trabalhado pela última vez.
+          </div>
         </div>
         <button onClick={onClose} className="w-full mt-6 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700 shadow-sm">Entendi</button>
       </div>
@@ -599,6 +683,42 @@ function Dashboard() {
 
   const { isAdmin, autorizado, loading: verificandoBanco, role } = useUsuario(user);
 
+  useEffect(() => {
+    if (!user || !autorizado) return;
+
+    let ativo = true;
+
+    const verificarSeTemTerritorios = async () => {
+      try {
+        let querySnapshot;
+
+        if (isNormalContext(contextoSistema?.contextoAtivoId)) {
+          const q = query(collection(db, "territorios"), where("designadoPara", "==", user.email));
+          querySnapshot = await getDocs(q);
+        } else {
+          const q = query(
+            getTerritorioContextCollectionRef(db),
+            where("contextoId", "==", contextoSistema.contextoAtivoId),
+            where("designadoPara", "==", user.email)
+          );
+          querySnapshot = await getDocs(q);
+        }
+
+        if (ativo && !querySnapshot.empty) {
+          setMeusTerritoriosAberto(true);
+        }
+      } catch (error) {
+        console.error('Erro ao verificar territórios designados:', error);
+      }
+    };
+
+    verificarSeTemTerritorios();
+
+    return () => {
+      ativo = false;
+    };
+  }, [autorizado, contextoSistema?.contextoAtivoId, user]);
+
   const handleLogout = () => {
     signOut(auth);
     navigate('/');
@@ -780,7 +900,18 @@ function Dashboard() {
       </div>
 
       <div className="flex-1 bg-gray-100 relative z-0">
-        <Mapa user={user} isAdmin={isAdmin} contextoSistema={contextoSistema} />
+        <Suspense
+          fallback={
+            <div className="h-full w-full flex items-center justify-center bg-gray-100">
+              <div className="flex flex-col items-center gap-4">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+                <span className="text-blue-600 font-semibold text-sm animate-pulse">Carregando mapa...</span>
+              </div>
+            </div>
+          }
+        >
+          <Mapa user={user} isAdmin={isAdmin} contextoSistema={contextoSistema} />
+        </Suspense>
       </div>
     </div>
   );

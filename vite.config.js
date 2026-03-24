@@ -4,6 +4,27 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   base: '/',
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+
+          if (id.includes('leaflet') || id.includes('react-leaflet')) {
+            return 'map-vendor';
+          }
+
+          if (id.includes('firebase')) {
+            return 'firebase-vendor';
+          }
+
+          if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+            return 'react-vendor';
+          }
+        }
+      }
+    }
+  },
   plugins: [
     react(),
     VitePWA({

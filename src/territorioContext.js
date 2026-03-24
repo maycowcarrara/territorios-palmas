@@ -3,6 +3,11 @@ import { NORMAL_CONTEXT_ID, isNormalContext } from './sistema';
 
 export const TERRITORIOS_COLLECTION = 'territorios';
 export const TERRITORIOS_CONTEXT_COLLECTION = 'territorios_contexto';
+export const TERRITORIO_STATUS = Object.freeze({
+    ABERTO: 'aberto',
+    AGUARDANDO_FINALIZACAO: 'aguardando_finalizacao',
+    FINALIZADO: 'finalizado'
+});
 
 export function getTerritorioBaseId(idTerritorio) {
     return `t_${idTerritorio}`;
@@ -35,7 +40,7 @@ export function getTerritorioContextCollectionRef(db) {
 
 export function buildBaseTerritorioDefaults(nome) {
     return {
-        status: 'aberto',
+        status: TERRITORIO_STATUS.ABERTO,
         nome,
         quadras_feitas: [],
         notas_quadras: {}
@@ -44,7 +49,7 @@ export function buildBaseTerritorioDefaults(nome) {
 
 export function buildContextTerritorioDefaults({ idTerritorio, nome, contextoSistema }) {
     return {
-        status: 'aberto',
+        status: TERRITORIO_STATUS.ABERTO,
         nome,
         territorioBaseId: getTerritorioBaseId(idTerritorio),
         territorioNumero: idTerritorio,
@@ -63,7 +68,7 @@ export function mergeTerritorioData({ contextoId, nomeFallback, baseData, stateD
 
     if (isNormalContext(contextoId)) {
         return {
-            status: 'aberto',
+            status: TERRITORIO_STATUS.ABERTO,
             quadras_feitas: [],
             historico: [],
             ...base,
@@ -73,7 +78,7 @@ export function mergeTerritorioData({ contextoId, nomeFallback, baseData, stateD
     }
 
     return {
-        status: 'aberto',
+        status: TERRITORIO_STATUS.ABERTO,
         nome: state.nome || base.nome || nomeFallback,
         quadras_feitas: [],
         designadoPara: null,
@@ -86,4 +91,43 @@ export function mergeTerritorioData({ contextoId, nomeFallback, baseData, stateD
         notas_quadras: notasPermanentes,
         ...state
     };
+}
+
+export function getTerritorioProgresso(data, totalQuadras = 0) {
+    const feitasReais = data?.quadras_feitas?.length || 0;
+    const totalSeguro = Math.max(totalQuadras || 0, 0);
+    const statusSalvo = data?.status || TERRITORIO_STATUS.ABERTO;
+    const temTodasQuadrasFeitas = totalSeguro > 0 && feitasReais >= totalSeguro;
+    const isFinalizado = statusSalvo === TERRITORIO_STATUS.FINALIZADO;
+    const isAguardandoFinalizacao = statusSalvo === TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO && temTodasQuadrasFeitas;
+    const quadrasFeitasExibicao = isFinalizado && totalSeguro > 0
+        ? totalSeguro
+        : Math.min(feitasReais, totalSeguro || feitasReais);
+    const percentualExibicao = totalSeguro > 0
+        ? Math.round((quadrasFeitasExibicao / totalSeguro) * 100)
+        : 0;
+
+    return {
+        statusSalvo,
+        feitasReais,
+        temTodasQuadrasFeitas,
+        isFinalizado,
+        isAguardandoFinalizacao,
+        quadrasFeitasExibicao,
+        percentualExibicao
+    };
+}
+
+export function getTerritorioStatusOperacional(data, totalQuadras = 0) {
+    const progresso = getTerritorioProgresso(data, totalQuadras);
+
+    if (progresso.isFinalizado) {
+        return TERRITORIO_STATUS.FINALIZADO;
+    }
+
+    if (progresso.isAguardandoFinalizacao) {
+        return TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO;
+    }
+
+    return data?.designadoPara ? 'ocupado' : 'livre';
 }

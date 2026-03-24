@@ -4,7 +4,7 @@ import { db } from './firebase';
 import { loadMapaData } from './mapData';
 import { buildFeatureIndex, getTerritorioQuadrasCount } from './mapaUtils';
 import { isNormalContext } from './sistema';
-import { getTerritorioContextCollectionRef } from './territorioContext';
+import { getTerritorioContextCollectionRef, getTerritorioProgresso } from './territorioContext';
 
 const defaultCoberturaState = {
     loading: false,
@@ -52,8 +52,8 @@ export function useCoberturaCampanha(contextoSistema) {
                     let territoriosCobertos = 0;
                     featureMap.forEach((feature, numeroId) => {
                         const totalQuadras = getTerritorioQuadrasCount(feature);
-                        const feitas = progressoMap.get(numeroId)?.quadras_feitas?.length || 0;
-                        if (feitas >= totalQuadras) {
+                        const progresso = getTerritorioProgresso(progressoMap.get(numeroId), totalQuadras);
+                        if (progresso.isFinalizado || progresso.temTodasQuadrasFeitas) {
                             territoriosCobertos += 1;
                         }
                     });

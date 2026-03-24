@@ -1,17 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from './firebase';
 import { loadMapaData } from './mapData';
 import { buildFeatureIndex, getFeatureBoundsStr, getTerritorioQuadrasCount } from './mapaUtils';
 import { useSistema } from './useSistema';
-import { getSistemaTheme, isNormalContext } from './sistema';
-import { getTerritorioContextCollectionRef, getTerritorioNumeroFromDocId, mergeTerritorioData } from './territorioContext';
+import { getSistemaTheme, isNormalContext, NORMAL_CONTEXT_ID } from './sistema';
+import {
+    getTerritorioContextCollectionRef,
+    getTerritorioNumeroFromDocId,
+    getTerritorioProgresso,
+    getTerritorioStatusOperacional,
+    mergeTerritorioData,
+    TERRITORIO_STATUS
+} from './territorioContext';
 
 const Relatorios = () => {
     const [territorios, setTerritorios] = useState([]);
     const [loading, setLoading] = useState(true);
     const [exportandoPdf, setExportandoPdf] = useState(false);
+    const [campanhas, setCampanhas] = useState([]);
+    const [contextoSelecionadoId, setContextoSelecionadoId] = useState(null);
     const { config: contextoSistema, loading: carregandoSistema } = useSistema();
     const temaSistema = getSistemaTheme(contextoSistema);
 
@@ -24,12 +33,92 @@ const Relatorios = () => {
     const [tempoFiltro, setTempoFiltro] = useState('todos');
     const [sortConfig, setSortConfig] = useState({ key: 'diasParado', direction: 'desc' });
 
+    const contextoRelatorioId = contextoSelecionadoId || contextoSistema.contextoAtivoId || NORMAL_CONTEXT_ID;
+    const contextoRelatorio = isNormalContext(contextoRelatorioId)
+        ? { id: NORMAL_CONTEXT_ID, titulo: 'Pregação normal', tipo: 'normal' }
+        : {
+            id: contextoRelatorioId,
+            titulo: campanhas.find((campanha) => campanha.id === contextoRelatorioId)?.titulo || contextoRelatorioId,
+            tipo: 'campanha'
+        };
+
+    const getStatusVisual = (status, porcentagem) => {
+        if (status === TERRITORIO_STATUS.FINALIZADO) {
+            return {
+                label: 'Finalizado',
+                badgeClass: 'bg-green-100 text-green-700 border border-green-200',
+                detailClass: 'text-green-600',
+                style: null,
+                progressoTexto: 'Concluído oficialmente'
+            };
+        }
+
+        if (status === TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO) {
+            return {
+                label: 'Aguardando',
+                badgeClass: 'bg-yellow-100 text-yellow-700 border border-yellow-200',
+                detailClass: 'text-yellow-700',
+                style: null,
+                progressoTexto: '100% aguardando confirmação'
+            };
+        }
+
+        if (status === 'ocupado') {
+            return {
+                label: 'Ocupado',
+                badgeClass: null,
+                detailClass: 'text-slate-400',
+                style: {
+                    background: `linear-gradient(90deg, #15803d ${porcentagem}%, #3b82f6 ${porcentagem}%)`,
+                    textShadow: '0px 1px 1px rgba(0,0,0,0.3)'
+                },
+                progressoTexto: `${porcentagem}% concluído`
+            };
+        }
+
+        return {
+            label: 'Livre',
+            badgeClass: 'bg-orange-100 text-orange-700 border border-orange-200',
+            detailClass: 'text-slate-400',
+            style: null,
+            progressoTexto: 'Disponível'
+        };
+    };
+
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, "campanhas"), (snapshot) => {
+            const lista = snapshot.docs.map((campanhaDoc) => ({
+                id: campanhaDoc.id,
+                ...campanhaDoc.data()
+            }));
+
+            lista.sort((a, b) => {
+                const dataA = a.atualizadaEm?.seconds || a.criadaEm?.seconds || 0;
+                const dataB = b.atualizadaEm?.seconds || b.criadaEm?.seconds || 0;
+                return dataB - dataA;
+            });
+
+            setCampanhas(lista);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
     useEffect(() => {
         if (carregandoSistema) return;
+        if (contextoSelecionadoId !== null) return;
+        setContextoSelecionadoId(contextoSistema.contextoAtivoId || NORMAL_CONTEXT_ID);
+    }, [carregandoSistema, contextoSelecionadoId, contextoSistema.contextoAtivoId]);
+
+    useEffect(() => {
+        if (carregandoSistema || !contextoRelatorioId) return;
 
         let ativo = true;
 
         const carregarDados = async () => {
+            if (ativo) {
+                setLoading(true);
+            }
             try {
                 const geoData = await loadMapaData();
                 const featureMap = buildFeatureIndex(geoData);
@@ -41,10 +130,10 @@ const Relatorios = () => {
                 });
 
                 const contextoMap = new Map();
-                if (!isNormalContext(contextoSistema.contextoAtivoId)) {
+                if (!isNormalContext(contextoRelatorioId)) {
                     const contextoSnapshot = await getDocs(query(
                         getTerritorioContextCollectionRef(db),
-                        where("contextoId", "==", contextoSistema.contextoAtivoId)
+                        where("contextoId", "==", contextoRelatorioId)
                     ));
 
                     contextoSnapshot.forEach((territorioDoc) => {
@@ -59,10 +148,10 @@ const Relatorios = () => {
                     const feature = featureMap.get(numeroId);
                     const nomeSeguro = feature?.properties?.nome || `Território ${numeroId}`;
                     const data = mergeTerritorioData({
-                        contextoId: contextoSistema.contextoAtivoId,
+                        contextoId: contextoRelatorioId,
                         nomeFallback: nomeSeguro,
                         baseData: baseMap.get(numeroId),
-                        stateData: isNormalContext(contextoSistema.contextoAtivoId) ? baseMap.get(numeroId) : contextoMap.get(numeroId)
+                        stateData: isNormalContext(contextoRelatorioId) ? baseMap.get(numeroId) : contextoMap.get(numeroId)
                     });
 
                     let totalQuadras = 1;
@@ -71,15 +160,18 @@ const Relatorios = () => {
 
                     if (feature) {
                         totalQuadras = getTerritorioQuadrasCount(feature);
-                        const feitas = data.quadras_feitas?.length || 0;
-                        porcentagem = Math.round((feitas / totalQuadras) * 100);
-                        if (porcentagem > 100) porcentagem = 100;
+                        const progresso = getTerritorioProgresso(data, totalQuadras);
+                        porcentagem = progresso.percentualExibicao;
                     }
+
+                    const statusOperacional = getTerritorioStatusOperacional(data, totalQuadras);
+                    const statusVisual = getStatusVisual(statusOperacional, porcentagem);
 
                     let diasParado = 0;
                     let dataUltimaStr = '-';
+                    let dataUltimaObj = null;
                     if (data.ultimaConclusao) {
-                        const dataUltimaObj = data.ultimaConclusao.toDate ? data.ultimaConclusao.toDate() : new Date(data.ultimaConclusao);
+                        dataUltimaObj = data.ultimaConclusao.toDate ? data.ultimaConclusao.toDate() : new Date(data.ultimaConclusao);
                         diasParado = Math.ceil(Math.abs(new Date() - dataUltimaObj) / (1000 * 60 * 60 * 24));
                         dataUltimaStr = dataUltimaObj.toLocaleDateString('pt-BR');
                     }
@@ -137,7 +229,7 @@ const Relatorios = () => {
                     }
 
                     return {
-                        id: isNormalContext(contextoSistema.contextoAtivoId) ? `t_${numeroId}` : `${contextoSistema.contextoAtivoId}__t_${numeroId}`,
+                        id: isNormalContext(contextoRelatorioId) ? `t_${numeroId}` : `${contextoRelatorioId}__t_${numeroId}`,
                         numeroId,
                         ...data,
                         nome: nomeSeguro,
@@ -147,10 +239,16 @@ const Relatorios = () => {
                         totalQuadras,
                         porcentagem,
                         dataUltimaStr,
+                        dataUltimaObj,
                         dataDesigStr,
                         dataDesigObj,
                         historicoLista: historicoProcessado,
-                        status: data.designadoPara ? 'ocupado' : 'livre',
+                        status: statusOperacional,
+                        statusLabel: statusVisual.label,
+                        statusBadgeClass: statusVisual.badgeClass,
+                        statusDetailClass: statusVisual.detailClass,
+                        statusStyle: statusVisual.style,
+                        progressoTexto: statusVisual.progressoTexto,
                         boundsStr
                     };
                 });
@@ -172,7 +270,7 @@ const Relatorios = () => {
         return () => {
             ativo = false;
         };
-    }, [carregandoSistema, contextoSistema]);
+    }, [carregandoSistema, contextoRelatorioId]);
 
     const formatarTempo = (dias) => {
         if (dias === 0) return "Hoje";
@@ -210,6 +308,8 @@ const Relatorios = () => {
         limparFiltros();
         if (tipo === 'livre') setStatusFiltro('livre');
         if (tipo === 'ocupado') setStatusFiltro('ocupado');
+        if (tipo === 'aguardando_finalizacao') setStatusFiltro(TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO);
+        if (tipo === 'finalizado') setStatusFiltro(TERRITORIO_STATUS.FINALIZADO);
         if (tipo === 'criticos') setTempoFiltro('4_meses');
     };
 
@@ -256,10 +356,9 @@ const Relatorios = () => {
     };
 
     const total = territorios.length;
-    const ocupados = territorios.filter(t => t.status === 'ocupado').length;
-    const livres = total - ocupados;
-    const criticos = territorios.filter(t => t.diasParado > 120).length;
-
+    const ocupados = territorios.filter(t => t.status === 'ocupado' || t.status === TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO).length;
+    const livres = territorios.filter(t => t.status === 'livre').length;
+    const finalizados = territorios.filter(t => t.status === TERRITORIO_STATUS.FINALIZADO).length;
     const getCorTempo = (dias) => {
         if (dias > 180) return 'bg-orange-600 text-white';
         if (dias > 120) return 'bg-orange-500 text-white';
@@ -281,14 +380,15 @@ const Relatorios = () => {
 
             const doc = new jsPDF();
             const baseUrl = window.location.href.split('#')[0];
-            const tituloRelatorio = contextoSistema.campanhaAtiva
-                ? `Relatório de Territórios - ${contextoSistema.contextoAtivoTitulo}`
-                : "Relatório de Territórios";
+            const tituloRelatorio = contextoRelatorio.tipo === 'campanha'
+                ? `Relatório de Territórios - ${contextoRelatorio.titulo}`
+                : "Relatório de Territórios - Pregação normal";
 
             doc.setFontSize(18);
             doc.text(tituloRelatorio, 14, 20);
             doc.setFontSize(10);
             doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 26);
+            doc.text(`Contexto: ${contextoRelatorio.titulo}`, 14, 31);
 
             doc.setFontSize(8);
             doc.setTextColor(100);
@@ -299,21 +399,28 @@ const Relatorios = () => {
             if (tempoFiltro === '6_meses') textoTempoFiltro = "+6 Meses";
 
             const textoFiltro = busca ? `Busca: "${busca}"` : "Sem busca";
-            doc.text(`Filtros: Status (${statusFiltro}) | Tempo (${textoTempoFiltro}) | ${textoFiltro}`, 14, 31);
+            doc.text(`Filtros: Status (${statusFiltro}) | Tempo (${textoTempoFiltro}) | ${textoFiltro}`, 14, 36);
 
             const tableColumn = ["Cód.", "Nome", "Status / Progresso", "Histórico / Ciclos", "Ult. Conclusão", "Tempo Parado"];
             const tableRows = [];
 
             dadosProcessados.forEach(t => {
                 let textoHistorico = "";
-                let statusTexto = t.status === 'ocupado' ? `Ocupado (${t.porcentagem}%) - Ult. Ed: ${t.ultimaEdicaoTexto}` : 'Livre';
+                let statusTexto = 'Livre';
 
                 if (t.status === 'ocupado') {
+                    statusTexto = `Em andamento (${t.porcentagem}%) - Ult. Ed: ${t.ultimaEdicaoTexto}`;
                     let atuais = t.designadoNome;
                     if (t.cicloAtual && Array.isArray(t.cicloAtual.responsaveis)) {
                         atuais = t.cicloAtual.responsaveis.join(", ");
                     }
                     textoHistorico += `[EM ANDAMENTO]\nDirigentes: ${atuais}\nDesde: ${t.dataDesigStr}\n\n`;
+                } else if (t.status === TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO) {
+                    statusTexto = `Aguardando finalização (100%) - Ult. Ed: ${t.ultimaEdicaoTexto}`;
+                    textoHistorico += `[AGUARDANDO FINALIZACAO]\nDirigente: ${t.designadoNome || '-'}\nDesde: ${t.dataDesigStr}\n\n`;
+                } else if (t.status === TERRITORIO_STATUS.FINALIZADO) {
+                    statusTexto = `Finalizado em ${t.dataUltimaStr}`;
+                    textoHistorico += `[FINALIZADO]\nUltima conclusao: ${t.dataUltimaStr}\n\n`;
                 } else {
                     textoHistorico += "LIVRE\n";
                 }
@@ -342,7 +449,7 @@ const Relatorios = () => {
             autoTable(doc, {
                 head: [tableColumn],
                 body: tableRows,
-                startY: 35,
+                startY: 40,
                 theme: 'grid',
                 styles: { fontSize: 8, cellPadding: 2, valign: 'top' },
                 headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255] },
@@ -360,7 +467,10 @@ const Relatorios = () => {
                 }
             });
 
-            doc.save(`Relatorio_Territorios.pdf`);
+            const nomeArquivo = isNormalContext(contextoRelatorioId)
+                ? 'Relatorio_Territorios_Normal.pdf'
+                : `Relatorio_${contextoRelatorio.id}.pdf`;
+            doc.save(nomeArquivo);
         } finally {
             setExportandoPdf(false);
         }
@@ -376,12 +486,16 @@ const Relatorios = () => {
                     <div className="text-center md:text-left">
                         <h1 className="text-2xl font-extrabold text-slate-800">Relatório de Territórios</h1>
                         <p className="text-slate-500 text-sm">Gerencie, filtre e veja o histórico.</p>
-                        {contextoSistema.campanhaAtiva && (
-                            <span className={`mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold ${temaSistema.panelBg} ${temaSistema.panelText} ${temaSistema.panelBorder}`}>
-                                <span>📢</span>
+                        <div className="mt-2 flex flex-wrap items-center justify-center gap-2 md:justify-start">
+                            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-700">
+                                <span>Relatório:</span>
+                                <span>{contextoRelatorio.titulo}</span>
+                            </span>
+                            <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold ${temaSistema.panelBg} ${temaSistema.panelText} ${temaSistema.panelBorder}`}>
+                                <span>{contextoSistema.campanhaAtiva ? '📢' : '🗺️'}</span>
                                 <span>Modo atual: {contextoSistema.contextoAtivoTitulo}</span>
                             </span>
-                        )}
+                        </div>
                     </div>
                     
                     <div className="flex items-center gap-3">
@@ -413,7 +527,7 @@ const Relatorios = () => {
                         <p className="text-[10px] text-slate-400 mt-1">Clique para ver todos</p>
                     </div>
                     <div onClick={() => aplicarFiltroRapido('ocupado')} className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-blue-100">
-                        <p className="text-xs font-bold text-blue-400 uppercase">Designados</p>
+                        <p className="text-xs font-bold text-blue-400 uppercase">Em trabalho</p>
                         <p className="text-3xl font-black text-blue-700">{ocupados}</p>
                         <p className="text-[10px] text-blue-400 mt-1">Clique para filtrar</p>
                     </div>
@@ -422,38 +536,78 @@ const Relatorios = () => {
                         <p className="text-3xl font-black text-green-700">{livres}</p>
                         <p className="text-[10px] text-green-500 mt-1">Clique para filtrar</p>
                     </div>
-                    <div onClick={() => aplicarFiltroRapido('criticos')} className="bg-orange-50 p-4 rounded-xl border border-orange-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-orange-100">
-                        <p className="text-xs font-bold text-orange-500 uppercase">Atrasados (+4 meses)</p>
-                        <p className="text-3xl font-black text-orange-700">{criticos}</p>
-                        <p className="text-[10px] text-orange-500 mt-1">Clique para ver lista</p>
+                    <div onClick={() => aplicarFiltroRapido('finalizado')} className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-emerald-100">
+                        <p className="text-xs font-bold text-emerald-500 uppercase">Finalizados</p>
+                        <p className="text-3xl font-black text-emerald-700">{finalizados}</p>
+                        <p className="text-[10px] text-emerald-500 mt-1">Clique para filtrar</p>
                     </div>
                 </div>
 
                 {/* BARRA DE FILTROS */}
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
-                    <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center">
-                        <div className="relative w-full lg:w-1/3">
-                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                            </span>
-                            <input type="text" placeholder="Buscar nome, código ou dirigente..." className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" value={busca} onChange={(e) => setBusca(e.target.value)} />
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px,minmax(0,1fr),210px,150px,auto] lg:items-end">
+                        <div className="w-full">
+                            <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">
+                                Contexto do relatório
+                            </label>
+                            <select
+                                value={contextoRelatorioId}
+                                onChange={(e) => {
+                                    setContextoSelecionadoId(e.target.value);
+                                    setLinhasExpandidas([]);
+                                }}
+                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 cursor-pointer"
+                            >
+                                <option value={NORMAL_CONTEXT_ID}>Pregação normal</option>
+                                {campanhas.map((campanha) => (
+                                    <option key={campanha.id} value={campanha.id}>
+                                        {campanha.titulo || campanha.id}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
-                        <div className="flex flex-col sm:flex-row w-full lg:w-auto gap-2 flex-1">
-                            <select value={statusFiltro} onChange={(e) => setStatusFiltro(e.target.value)} className="w-full sm:w-auto px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 cursor-pointer">
+                        <div className="w-full">
+                            <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">
+                                Busca
+                            </label>
+                            <div className="relative">
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                </span>
+                                <input type="text" placeholder="Buscar nome, código ou dirigente..." className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" value={busca} onChange={(e) => setBusca(e.target.value)} />
+                            </div>
+                        </div>
+                        <div className="w-full">
+                            <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">
+                                Status
+                            </label>
+                            <select value={statusFiltro} onChange={(e) => setStatusFiltro(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 cursor-pointer">
                                 <option value="todos">Status: Todos</option>
                                 <option value="livre">Apenas Livres</option>
-                                <option value="ocupado">Apenas Ocupados</option>
+                                <option value="ocupado">Em andamento</option>
+                                <option value={TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO}>Aguardando finalização</option>
+                                <option value={TERRITORIO_STATUS.FINALIZADO}>Finalizados</option>
                             </select>
-
-                            <select value={tempoFiltro} onChange={(e) => setTempoFiltro(e.target.value)} className="w-full sm:w-auto px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 cursor-pointer">
+                        </div>
+                        <div className="w-full">
+                            <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">
+                                Tempo
+                            </label>
+                            <select value={tempoFiltro} onChange={(e) => setTempoFiltro(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 cursor-pointer">
                                 <option value="todos">Tempo: Todos</option>
                                 <option value="2_meses">+2 Meses</option>
                                 <option value="4_meses">+4 Meses</option>
                                 <option value="6_meses">+6 Meses</option>
                             </select>
-
-                            {(busca || statusFiltro !== 'todos' || tempoFiltro !== 'todos') && (
-                                <button onClick={limparFiltros} className="w-full sm:w-auto px-3 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 font-semibold">✕ Limpar</button>
+                        </div>
+                        <div className="w-full lg:w-auto">
+                            <div className="hidden lg:block text-[11px] font-bold uppercase tracking-wide text-transparent mb-1 select-none">
+                                Ações
+                            </div>
+                            {(busca || statusFiltro !== 'todos' || tempoFiltro !== 'todos') ? (
+                                <button onClick={limparFiltros} className="w-full px-3 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1 font-semibold">✕ Limpar</button>
+                            ) : (
+                                <div className="hidden lg:block h-[42px]"></div>
                             )}
                         </div>
                     </div>
@@ -480,27 +634,25 @@ const Relatorios = () => {
                                     </h3>
                                 </div>
                                 <div className="flex flex-col items-end gap-1">
-                                    {t.status === 'ocupado' ?
+                                    {t.status === 'ocupado' ? (
                                         <div className="flex flex-col items-end">
-                                            {/* PÍLULA PADRONIZADA COM TEXTO OCUPADO E NUMERO AO FUNDO (DIREITA) */}
                                             <span 
                                                 className="inline-flex items-center justify-between px-3 py-1 rounded-full text-[10px] font-bold text-white border border-white/20 uppercase shadow-sm min-w-[100px]"
-                                                style={{ 
-                                                    background: `linear-gradient(90deg, #15803d ${t.porcentagem}%, #3b82f6 ${t.porcentagem}%)`,
-                                                    textShadow: '0px 1px 1px rgba(0,0,0,0.3)'
-                                                }}
+                                                style={t.statusStyle}
                                                 title={`${t.porcentagem}% Concluído`}
                                             >
-                                                <span>Ocupado</span>
+                                                <span>{t.statusLabel}</span>
                                                 <span className="opacity-50 text-[9px] ml-1">{t.porcentagem}%</span>
                                             </span>
                                             <span className={`text-[9px] mt-0.5 ${t.diasSemEdicao > 10 ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
                                                 {t.diasSemEdicao > 10 && '⚠️ '}Edição: {t.ultimaEdicaoTexto}
                                             </span>
                                         </div>
-                                         :
-                                        <span className="inline-flex items-center justify-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200 uppercase min-w-[100px]">Livre</span>
-                                    }
+                                    ) : (
+                                        <span className={`inline-flex items-center justify-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase min-w-[100px] ${t.statusBadgeClass}`}>
+                                            {t.statusLabel}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
 
@@ -513,18 +665,24 @@ const Relatorios = () => {
                                     <span className="text-slate-400 text-xs">Designado em</span>
                                     <span className="font-medium">{t.dataDesigStr}</span>
                                 </div>
-                                {t.status === 'livre' && (
+                                {t.status !== 'ocupado' && t.status !== TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO && (
                                     <div className="flex justify-between border-b border-slate-50 pb-1">
                                         <span className="text-slate-400 text-xs">Última Conclusão</span>
                                         <span className="font-medium">{t.dataUltimaStr}</span>
                                     </div>
                                 )}
-                                {t.status === 'livre' && (
+                                {t.status !== 'ocupado' && t.status !== TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO && (
                                     <div className="flex justify-between">
                                         <span className="text-slate-400 text-xs">Tempo Parado</span>
                                         <span className={`px-2 py-0.5 rounded text-xs font-bold ${getCorTempo(t.diasParado)}`}>
                                             {formatarTempo(t.diasParado)}
                                         </span>
+                                    </div>
+                                )}
+                                {t.status === TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO && (
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-400 text-xs">Situação</span>
+                                        <span className="font-medium text-yellow-700">Falta confirmar o encerramento</span>
                                     </div>
                                 )}
                             </div>
@@ -612,30 +770,27 @@ const Relatorios = () => {
                                             </td>
                                             
                                             <td className="px-4 py-3">
-                                                {t.status === 'ocupado' ?
+                                                {t.status === 'ocupado' ? (
                                                     <div className="flex flex-col items-start">
-                                                        {/* PÍLULA PADRONIZADA COM TEXTO OCUPADO E NUMERO AO FUNDO (DIREITA) */}
                                                         <span 
                                                             className="inline-flex items-center justify-between gap-1 px-3 py-1 rounded-full text-[10px] font-bold text-white border border-white/20 uppercase shadow-sm min-w-[100px]"
-                                                            style={{ 
-                                                                background: `linear-gradient(90deg, #15803d ${t.porcentagem}%, #3b82f6 ${t.porcentagem}%)`,
-                                                                textShadow: '0px 1px 1px rgba(0,0,0,0.3)'
-                                                            }}
+                                                            style={t.statusStyle}
                                                             title={`${t.porcentagem}% Concluído`}
                                                         >
-                                                            <span>Ocupado</span>
+                                                            <span>{t.statusLabel}</span>
                                                             <span className="opacity-50 text-[9px]">{t.porcentagem}%</span>
                                                         </span>
                                                         <span className={`text-[9px] ml-1 mt-0.5 ${t.diasSemEdicao > 10 ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
                                                             {t.diasSemEdicao > 10 && '⚠️ '}Ult. ed: {t.ultimaEdicaoTexto}
                                                         </span>
-                                                    </div> :
-                                                    <span className="inline-flex items-center justify-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200 uppercase min-w-[100px]">Livre</span>
-                                                }
+                                                    </div>
+                                                ) : (
+                                                    <span className={`inline-flex items-center justify-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase min-w-[100px] ${t.statusBadgeClass}`}>{t.statusLabel}</span>
+                                                )}
                                             </td>
                                             <td className="px-4 py-3 text-slate-600">
                                                 {t.designadoNome || '-'}
-                                                {t.status === 'ocupado' && t.cicloAtual && t.cicloAtual.responsaveis && t.cicloAtual.responsaveis.length > 1 && (
+                                                {(t.status === 'ocupado' || t.status === TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO) && t.cicloAtual && t.cicloAtual.responsaveis && t.cicloAtual.responsaveis.length > 1 && (
                                                     <span className="text-[10px] text-blue-500 ml-1">(+ {t.cicloAtual.responsaveis.length - 1} outros)</span>
                                                 )}
                                             </td>
