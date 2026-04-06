@@ -134,6 +134,27 @@ const AjudaModal = ({ isOpen, onClose }) => {
                         </p>
                     </section>
 
+                    <section className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <h4 className="font-bold text-gray-800 text-sm mb-2">Privacidade e documentos</h4>
+                        <p className="text-xs text-gray-600 mb-3">
+                            Consulte os documentos públicos do app sempre que precisar.
+                        </p>
+                        <div className="flex flex-wrap gap-3 text-xs font-semibold">
+                            <a href="/privacy-policy.html" className="text-blue-600 hover:text-blue-700 hover:underline">
+                                Política de Privacidade
+                            </a>
+                            <a href="/terms-of-use.html" className="text-blue-600 hover:text-blue-700 hover:underline">
+                                Termos de Uso
+                            </a>
+                            <a href="/account-deletion.html" className="text-blue-600 hover:text-blue-700 hover:underline">
+                                Exclusão de Conta
+                            </a>
+                            <a href="/data-deletion-request.html" className="text-blue-600 hover:text-blue-700 hover:underline">
+                                Exclusão de Dados
+                            </a>
+                        </div>
+                    </section>
+
                 </div>
 
                 {/* Rodapé */}

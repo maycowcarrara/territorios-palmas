@@ -1,0 +1,14 @@
+{
+  "appId": "br.com.territoriospalmas.app",
+  "appName": "Territórios Palmas",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": [
+        "sound",
+        "alert"
+      ]
+    }
+  }
+}

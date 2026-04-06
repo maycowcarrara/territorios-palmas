@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+android/local.properties
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
+territorios-palmas-debug.apk

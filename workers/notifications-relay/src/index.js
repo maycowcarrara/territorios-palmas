@@ -1,0 +1,564 @@
+const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+let cachedAccessToken = null;
+let cachedAccessTokenExpiry = 0;
+
+const json = (data, status = 200, extraHeaders = {}) =>
+    new Response(JSON.stringify(data), {
+        status,
+        headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            ...extraHeaders
+        }
+    });
+
+const corsHeaders = (request) => ({
+    'Access-Control-Allow-Origin': request.headers.get('Origin') || '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+});
+
+const parseJsonBody = async (request) => {
+    try {
+        return await request.json();
+    } catch {
+        throw new Error('Corpo JSON inválido.');
+    }
+};
+
+const encodeBase64Url = (input) =>
+    btoa(String.fromCharCode(...new Uint8Array(input)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/g, '');
+
+const pemToArrayBuffer = (pem) => {
+    const normalized = pem
+        .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+        .replace(/-----END PRIVATE KEY-----/g, '')
+        .replace(/\s+/g, '');
+
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes.buffer;
+};
+
+const importPrivateKey = async (privateKeyPem) =>
+    crypto.subtle.importKey(
+        'pkcs8',
+        pemToArrayBuffer(privateKeyPem),
+        {
+            name: 'RSASSA-PKCS1-v1_5',
+            hash: 'SHA-256'
+        },
+        false,
+        ['sign']
+    );
+
+const signJwt = async (claims, privateKeyPem) => {
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const encoder = new TextEncoder();
+    const encodedHeader = encodeBase64Url(encoder.encode(JSON.stringify(header)));
+    const encodedClaims = encodeBase64Url(encoder.encode(JSON.stringify(claims)));
+    const data = `${encodedHeader}.${encodedClaims}`;
+    const key = await importPrivateKey(privateKeyPem);
+    const signature = await crypto.subtle.sign(
+        'RSASSA-PKCS1-v1_5',
+        key,
+        encoder.encode(data)
+    );
+
+    return `${data}.${encodeBase64Url(signature)}`;
+};
+
+const getServiceAccountPrivateKey = (env) =>
+    String(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+
+const getGoogleAccessToken = async (env) => {
+    const now = Math.floor(Date.now() / 1000);
+    if (cachedAccessToken && cachedAccessTokenExpiry - 60 > now) {
+        return cachedAccessToken;
+    }
+
+    const clientEmail = env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    const privateKey = getServiceAccountPrivateKey(env);
+
+    if (!clientEmail || !privateKey) {
+        throw new Error('Secrets do service account não configurados no Worker.');
+    }
+
+    const jwt = await signJwt({
+        iss: clientEmail,
+        sub: clientEmail,
+        aud: GOOGLE_OAUTH_TOKEN_URL,
+        iat: now,
+        exp: now + 3600,
+        scope: 'https://www.googleapis.com/auth/cloud-platform'
+    }, privateKey);
+
+    const tokenResponse = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+            grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            assertion: jwt
+        })
+    });
+
+    const tokenData = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokenData.access_token) {
+        throw new Error(`Falha ao obter access token Google: ${JSON.stringify(tokenData)}`);
+    }
+
+    cachedAccessToken = tokenData.access_token;
+    cachedAccessTokenExpiry = now + Number(tokenData.expires_in || 3600);
+    return cachedAccessToken;
+};
+
+const verifyFirebaseIdToken = async (idToken, env) => {
+    const apiKey = env.FIREBASE_WEB_API_KEY;
+    if (!apiKey) {
+        throw new Error('FIREBASE_WEB_API_KEY não configurada no Worker.');
+    }
+
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ idToken })
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data?.users?.length) {
+        throw new Error('Não foi possível validar a sessão Firebase no Worker.');
+    }
+
+    return data.users[0];
+};
+
+const parseFirestoreValue = (value) => {
+    if (value.stringValue !== undefined) return value.stringValue;
+    if (value.booleanValue !== undefined) return value.booleanValue;
+    if (value.integerValue !== undefined) return Number(value.integerValue);
+    if (value.doubleValue !== undefined) return Number(value.doubleValue);
+    if (value.timestampValue !== undefined) return value.timestampValue;
+    if (value.arrayValue !== undefined) {
+        return (value.arrayValue.values || []).map(parseFirestoreValue);
+    }
+    if (value.mapValue !== undefined) {
+        return parseFirestoreFields(value.mapValue.fields || {});
+    }
+    if (value.nullValue !== undefined) return null;
+    return null;
+};
+
+const parseFirestoreFields = (fields) =>
+    Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, parseFirestoreValue(value)]));
+
+const toFirestoreValue = (value) => {
+    if (value === null || value === undefined) return { nullValue: null };
+    if (value instanceof Date) return { timestampValue: value.toISOString() };
+    if (Array.isArray(value)) {
+        return { arrayValue: { values: value.map(toFirestoreValue) } };
+    }
+    if (typeof value === 'boolean') return { booleanValue: value };
+    if (typeof value === 'number') return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+    if (typeof value === 'object') {
+        return {
+            mapValue: {
+                fields: Object.fromEntries(
+                    Object.entries(value).map(([key, nestedValue]) => [key, toFirestoreValue(nestedValue)])
+                )
+            }
+        };
+    }
+    return { stringValue: String(value) };
+};
+
+const firestoreDocumentUrl = (env, path) =>
+    `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${path}`;
+
+const firestoreDocumentName = (env, path) =>
+    `projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${path}`;
+
+const firestoreCommitUrl = (env) =>
+    `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents:commit`;
+
+const getFirestoreDocument = async (env, accessToken, path) => {
+    const response = await fetch(firestoreDocumentUrl(env, path), {
+        headers: {
+            Authorization: `Bearer ${accessToken}`
+        }
+    });
+
+    if (response.status === 404) return null;
+
+    const data = await response.json();
+    if (!response.ok) {
+        throw new Error(`Erro ao buscar documento Firestore ${path}: ${JSON.stringify(data)}`);
+    }
+
+    return {
+        name: data.name,
+        id: data.name.split('/').pop(),
+        ...parseFirestoreFields(data.fields || {})
+    };
+};
+
+const listUsuarios = async (env, accessToken) => {
+    let pageToken = '';
+    const usuarios = [];
+
+    do {
+        const url = new URL(firestoreDocumentUrl(env, 'usuarios'));
+        url.searchParams.set('pageSize', '1000');
+        if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+        const response = await fetch(url, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`
+            }
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(`Erro ao listar usuários do Firestore: ${JSON.stringify(data)}`);
+        }
+
+        for (const doc of data.documents || []) {
+            usuarios.push({
+                name: doc.name,
+                id: doc.name.split('/').pop(),
+                ...parseFirestoreFields(doc.fields || {})
+            });
+        }
+
+        pageToken = data.nextPageToken || '';
+    } while (pageToken);
+
+    return usuarios;
+};
+
+const escreverNotificacoes = async (env, accessToken, notificacoes) => {
+    if (!notificacoes.length) return;
+
+    const batchSize = 400;
+    for (let index = 0; index < notificacoes.length; index += batchSize) {
+        const writes = notificacoes.slice(index, index + batchSize).map((notificacao) => ({
+            update: {
+                name: firestoreDocumentName(env, `notificacoes/${crypto.randomUUID()}`),
+                fields: Object.fromEntries(
+                    Object.entries(notificacao).map(([key, value]) => [key, toFirestoreValue(value)])
+                )
+            }
+        }));
+
+        const response = await fetch(firestoreCommitUrl(env), {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ writes })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(`Erro ao gravar notificações no Firestore: ${JSON.stringify(data)}`);
+        }
+    }
+};
+
+const enviarMensagemFcm = async (env, accessToken, { token, titulo, mensagem, tipo = 'sistema', targetRoute = '/app' }) => {
+    const response = await fetch(`https://fcm.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/messages:send`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            message: {
+                token,
+                notification: {
+                    title: titulo,
+                    body: mensagem
+                },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        channel_id: 'territorios-alertas'
+                    }
+                },
+                data: {
+                    tipo,
+                    targetRoute
+                }
+            }
+        })
+    });
+
+    if (response.ok) {
+        return { ok: true };
+    }
+
+    const data = await response.json().catch(() => ({}));
+    return { ok: false, error: data };
+};
+
+const getDestinatariosBroadcast = (usuarios, destino) => {
+    if (destino === 'admins') {
+        return usuarios.filter((user) => user.role === 'admin');
+    }
+
+    if (destino === 'todos') {
+        return usuarios.filter((user) => user.role === 'admin' || user.role === 'comum');
+    }
+
+    throw new Error('Destino inválido para o comunicado.');
+};
+
+const getDestinatariosNotificacao = ({ usuarios, para }) => {
+    if (para === 'ADMINS') {
+        return usuarios.filter((user) => user.role === 'admin');
+    }
+
+    return usuarios.filter((user) => user.id === para);
+};
+
+const getTokensDestinatarios = (destinatarios) => [...new Set(
+    destinatarios.flatMap((user) => {
+        const lista = Array.isArray(user.fcmTokens) ? user.fcmTokens : [];
+        return lista.length ? lista : (user.ultimoFcmToken ? [user.ultimoFcmToken] : []);
+    }).filter(Boolean)
+)];
+
+const buildNotificacoesBroadcast = (destino, mensagem, agora, destinatarios) => {
+    if (destino === 'admins') {
+        return [{
+            para: 'ADMINS',
+            texto: mensagem,
+            data: agora,
+            lida: false,
+            tipo: 'comunicado',
+            origem: 'admin'
+        }];
+    }
+
+    return destinatarios.map((user) => ({
+        para: user.id,
+        texto: mensagem,
+        data: agora,
+        lida: false,
+        tipo: 'comunicado',
+        origem: 'admin'
+    }));
+};
+
+const buildNotificacaoAvulsa = (notificacao, agora) => [{
+    para: notificacao.para,
+    texto: notificacao.texto,
+    data: agora,
+    lida: false,
+    tipo: notificacao.tipo || 'sistema',
+    origem: notificacao.origem || 'sistema'
+}];
+
+const getPushConfigBroadcast = (destino) => ({
+    titulo: destino === 'admins' ? 'Comunicado para administradores' : 'Comunicado do Territórios',
+    targetRoute: destino === 'admins' ? '/admin' : '/app',
+    tipo: 'comunicado'
+});
+
+const getPushConfigNotificacao = ({ para, tipo, tituloPush }) => {
+    const tipoNormalizado = String(tipo || 'sistema');
+
+    if (tituloPush) {
+        return {
+            titulo: tituloPush,
+            targetRoute: para === 'ADMINS' ? '/admin' : '/app',
+            tipo: tipoNormalizado
+        };
+    }
+
+    const configPorTipo = {
+        cadastro: {
+            titulo: 'Novo cadastro pendente',
+            targetRoute: '/admin'
+        },
+        conclusao: {
+            titulo: 'Território finalizado',
+            targetRoute: '/app'
+        },
+        devolucao: {
+            titulo: 'Território devolvido',
+            targetRoute: '/app'
+        },
+        comunicado: {
+            titulo: para === 'ADMINS' ? 'Comunicado para administradores' : 'Comunicado do Territórios',
+            targetRoute: para === 'ADMINS' ? '/admin' : '/app'
+        },
+        sistema: {
+            titulo: 'Aviso do Territórios',
+            targetRoute: para === 'ADMINS' ? '/admin' : '/app'
+        }
+    };
+
+    const config = configPorTipo[tipoNormalizado] || configPorTipo.sistema;
+    return {
+        titulo: config.titulo,
+        targetRoute: config.targetRoute,
+        tipo: tipoNormalizado
+    };
+};
+
+const enviarPushes = async (env, accessToken, { titulo, mensagem, tipo, tokens, targetRoute }) => {
+    const resultados = await Promise.all(tokens.map((token) => enviarMensagemFcm(env, accessToken, {
+        token,
+        titulo,
+        mensagem,
+        tipo,
+        targetRoute
+    })));
+
+    return {
+        pushesEnviados: resultados.filter((item) => item.ok).length,
+        pushesFalharam: resultados.filter((item) => !item.ok).length
+    };
+};
+
+export default {
+    async fetch(request, env) {
+        const headers = corsHeaders(request);
+
+        if (request.method === 'OPTIONS') {
+            return new Response(null, { status: 204, headers });
+        }
+
+        if (request.method !== 'POST') {
+            return json({ error: 'Método não permitido.' }, 405, headers);
+        }
+
+        try {
+            if (!env.FIREBASE_PROJECT_ID) {
+                throw new Error('FIREBASE_PROJECT_ID não configurado no Worker.');
+            }
+
+            const body = await parseJsonBody(request);
+            const action = String(body?.action || 'broadcast').trim();
+            const idToken = String(body?.idToken || '').trim();
+
+            if (!idToken) {
+                return json({ error: 'Sessão ausente para enviar notificação.' }, 401, headers);
+            }
+
+            const authUser = await verifyFirebaseIdToken(idToken, env);
+            const email = String(authUser.email || '').toLowerCase();
+            if (!email) {
+                return json({ error: 'E-mail do usuário autenticado não encontrado.' }, 401, headers);
+            }
+
+            const accessToken = await getGoogleAccessToken(env);
+            const usuarioRemetente = await getFirestoreDocument(env, accessToken, `usuarios/${encodeURIComponent(email)}`);
+            const isAdmin = usuarioRemetente?.role === 'admin';
+            const usuarios = await listUsuarios(env, accessToken);
+
+            if (action === 'broadcast') {
+                const mensagem = String(body?.mensagem || '').trim();
+                const destino = String(body?.destino || '').trim();
+
+                if (!mensagem) {
+                    return json({ error: 'Mensagem obrigatória.' }, 400, headers);
+                }
+
+                if (!isAdmin) {
+                    return json({ error: 'Somente administradores podem enviar comunicado com push.' }, 403, headers);
+                }
+
+                const destinatarios = getDestinatariosBroadcast(usuarios, destino);
+                const tokens = getTokensDestinatarios(destinatarios);
+                const agora = new Date();
+                const notificacoesInternas = buildNotificacoesBroadcast(destino, mensagem, agora, destinatarios);
+                await escreverNotificacoes(env, accessToken, notificacoesInternas);
+
+                const pushConfig = getPushConfigBroadcast(destino);
+                const { pushesEnviados, pushesFalharam } = await enviarPushes(env, accessToken, {
+                    titulo: pushConfig.titulo,
+                    mensagem,
+                    tipo: pushConfig.tipo,
+                    tokens,
+                    targetRoute: pushConfig.targetRoute
+                });
+
+                return json({
+                    ok: true,
+                    action,
+                    destino,
+                    destinatarios: destinatarios.length,
+                    tokens: tokens.length,
+                    pushesEnviados,
+                    pushesFalharam
+                }, 200, headers);
+            }
+
+            if (action === 'notify') {
+                const notificacao = body?.notificacao || {};
+                const para = String(notificacao?.para || '').trim();
+                const texto = String(notificacao?.texto || '').trim();
+                const tipo = String(notificacao?.tipo || 'sistema').trim();
+                const origem = String(notificacao?.origem || 'sistema').trim();
+                const tituloPush = String(notificacao?.tituloPush || 'Territórios').trim();
+
+                if (!para || !texto) {
+                    return json({ error: 'Notificação inválida: informe destinatário e texto.' }, 400, headers);
+                }
+
+                if (para !== 'ADMINS' && !isAdmin) {
+                    return json({ error: 'Somente administradores podem enviar notificações para outros usuários.' }, 403, headers);
+                }
+
+                const destinatarios = getDestinatariosNotificacao({ usuarios, para });
+                const tokens = getTokensDestinatarios(destinatarios);
+                const agora = new Date();
+                const notificacoesInternas = buildNotificacaoAvulsa({
+                    para,
+                    texto,
+                    tipo,
+                    origem
+                }, agora);
+                await escreverNotificacoes(env, accessToken, notificacoesInternas);
+
+                const pushConfig = getPushConfigNotificacao({ para, tipo, tituloPush });
+                const { pushesEnviados, pushesFalharam } = await enviarPushes(env, accessToken, {
+                    titulo: pushConfig.titulo,
+                    mensagem: texto,
+                    tipo: pushConfig.tipo,
+                    tokens,
+                    targetRoute: pushConfig.targetRoute
+                });
+
+                return json({
+                    ok: true,
+                    action,
+                    para,
+                    destinatarios: destinatarios.length,
+                    tokens: tokens.length,
+                    pushesEnviados,
+                    pushesFalharam
+                }, 200, headers);
+            }
+
+            return json({ error: 'Ação de relay inválida.' }, 400, headers);
+        } catch (error) {
+            console.error('Erro no notifications relay:', error);
+            return json({
+                error: error instanceof Error ? error.message : 'Falha inesperada no relay.'
+            }, 500, headers);
+        }
+    }
+};

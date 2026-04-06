@@ -1,8 +1,12 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { HashRouter, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
-import { signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { HashRouter, Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { signInWithPopup, onAuthStateChanged } from 'firebase/auth';
 import { auth, googleProvider, db } from './firebase';
-import { collection, query, where, getDocs, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, onSnapshot, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
+import { signInWithGoogleNative, signOutGoogleNative } from './nativeGoogleAuth';
+import { ativarPushNotifications, desativarPushNotifications } from './pushNotifications';
 import { useUsuario } from './useUsuario';
 import appInfo from './version.json';
 import AutoUpdate from './AutoUpdate';
@@ -12,8 +16,10 @@ import { loadMapaData } from './mapData';
 import { buildFeatureIndex, getFeatureBoundsStr, getTerritorioQuadrasCount } from './mapaUtils';
 import { useSistema } from './useSistema';
 import { getSistemaTheme, isNormalContext } from './sistema';
-import { getTerritorioContextCollectionRef, getTerritorioProgresso } from './territorioContext';
+import { getTerritorioContextCollectionRef, getTerritorioProgresso, getTerritorioStateRef } from './territorioContext';
 import { useCoberturaCampanha } from './useCoberturaCampanha';
+import { finalizarTerritorioDesignado } from './territorioActions';
+import { UiFeedbackProvider, useUiFeedback } from './uiFeedback';
 
 const Mapa = lazy(() => import('./Mapa'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -34,10 +40,52 @@ function Login() {
   const [verificandoSessao, setVerificandoSessao] = useState(true);
   const [erro, setErro] = useState('');
 
+  const extrairMensagemErroGoogle = (error) => {
+    const partes = [
+      error?.message,
+      error?.errorMessage,
+      error?.result?.message,
+      error?.result?.errorMessage,
+      error?.details?.message
+    ].filter(Boolean);
+
+    const mensagem = partes.map((parte) => String(parte)).join(' | ');
+
+    if (!mensagem) {
+      return 'Erro ao conectar com Google. Tente novamente.';
+    }
+
+    if (mensagem.includes('VITE_GOOGLE_WEB_CLIENT_ID')) {
+      return 'Falta configurar o client ID do Google para o app Android.';
+    }
+
+    if (
+      mensagem.includes('No credentials available')
+      || mensagem.includes('Cannot find a matching credential')
+      || mensagem.includes('no google account')
+    ) {
+      return 'O emulador precisa ter uma conta Google conectada para esse login funcionar.';
+    }
+
+    if (mensagem.includes('scopes without modifying the main activity')) {
+      return 'A configuração nativa do login Google no Android ainda não está válida.';
+    }
+
+    if (mensagem.includes('10:')) {
+      return 'O Google recusou o login no Android. Normalmente isso indica SHA ou google-services.json desatualizado.';
+    }
+
+    if (mensagem.includes('16:')) {
+      return 'Não foi possível concluir o login Google agora. Tente remover e adicionar a conta Google no emulador.';
+    }
+
+    return `Erro ao conectar com Google: ${mensagem}`;
+  };
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        navigate('/app');
+        navigate('/app', { replace: true });
       } else {
         setVerificandoSessao(false);
       }
@@ -49,10 +97,17 @@ function Login() {
     setLoading(true);
     setErro('');
     try {
+      if (Capacitor.isNativePlatform()) {
+        await signInWithGoogleNative();
+        navigate('/app', { replace: true });
+        return;
+      }
+
       await signInWithPopup(auth, googleProvider);
+      navigate('/app', { replace: true });
     } catch (error) {
       console.error(error);
-      setErro("Erro ao conectar com Google. Tente novamente.");
+      setErro(extrairMensagemErroGoogle(error));
       setLoading(false);
     }
   };
@@ -95,6 +150,23 @@ function Login() {
               )}
             </button>
             {erro && <p className="text-red-500 text-xs mt-2">{erro}</p>}
+            <div className="pt-2 text-xs text-gray-500">
+              <p className="mb-2">Ao continuar, você concorda com os Termos de Uso e com a Política de Privacidade do aplicativo.</p>
+              <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
+                <a href="/privacy-policy.html" className="font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+                  Política de Privacidade
+                </a>
+                <a href="/terms-of-use.html" className="font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+                  Termos de Uso
+                </a>
+                <a href="/account-deletion.html" className="font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+                  Exclusão de Conta
+                </a>
+                <a href="/data-deletion-request.html" className="font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+                  Exclusão de Dados
+                </a>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -115,7 +187,7 @@ const SininhoNotificacoes = ({ user, isAdmin }) => {
     const unsub1 = onSnapshot(q1, (snap) => {
       const minhas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setNotificacoes(prev => {
-        const outras = prev.filter(p => p.origem === 'admin');
+        const outras = prev.filter(p => p.escopoNotificacao === 'admins');
         const listaFinal = [...outras, ...minhas];
         return listaFinal.sort((a, b) => (b.data?.seconds || 0) - (a.data?.seconds || 0));
       });
@@ -125,9 +197,9 @@ const SininhoNotificacoes = ({ user, isAdmin }) => {
     if (isAdmin) {
       const q2 = query(collection(db, "notificacoes"), where("para", "==", "ADMINS"));
       const unsub2 = onSnapshot(q2, (snap) => {
-        const deAdmin = snap.docs.map(d => ({ id: d.id, ...d.data(), origem: 'admin' }));
+        const deAdmin = snap.docs.map(d => ({ id: d.id, ...d.data(), escopoNotificacao: 'admins' }));
         setNotificacoes(prev => {
-          const pessoais = prev.filter(p => p.origem !== 'admin');
+          const pessoais = prev.filter(p => p.escopoNotificacao !== 'admins');
           const listaFinal = [...pessoais, ...deAdmin];
           return listaFinal.sort((a, b) => (b.data?.seconds || 0) - (a.data?.seconds || 0));
         });
@@ -260,10 +332,98 @@ const SistemaChip = ({ contextoSistema, compact = false, coberturaCampanha = nul
   );
 };
 
+const ModalConfirmacaoLogout = ({ isOpen, onConfirmar, onCancelar }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[4000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="bg-red-600 px-4 py-3">
+          <h3 className="text-lg font-bold text-white">Confirmar saída</h3>
+        </div>
+        <div className="p-4 text-sm text-gray-700">
+          <p>Deseja realmente sair da sua conta do Google?</p>
+        </div>
+        <div className="flex gap-3 px-4 pb-4">
+          <button
+            onClick={onConfirmar}
+            className="flex-1 rounded-lg bg-red-600 px-4 py-2 font-bold text-white hover:bg-red-700"
+          >
+            Sair
+          </button>
+          <button
+            onClick={onCancelar}
+            className="flex-1 rounded-lg bg-gray-200 px-4 py-2 font-bold text-gray-700 hover:bg-gray-300"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SobreModal = ({ isOpen, onClose }) => {
+  if (!isOpen) return null;
+
+  const links = [
+    { href: '/privacy-policy.html', label: 'Política de Privacidade', emoji: '🔒' },
+    { href: '/terms-of-use.html', label: 'Termos de Uso', emoji: '📄' },
+    { href: '/account-deletion.html', label: 'Exclusão de Conta', emoji: '👤' },
+    { href: '/data-deletion-request.html', label: 'Exclusão de Dados', emoji: '🗑️' }
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[4000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-blue-600 px-5 py-4 text-white">
+          <h3 className="text-lg font-bold">Sobre o app</h3>
+          <p className="mt-1 text-sm text-blue-100">Informações, versão atual e documentos importantes.</p>
+        </div>
+
+        <div className="space-y-5 p-5">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-center">
+            <p className="text-sm font-bold text-blue-900">Territórios Digitais</p>
+            <p className="mt-1 text-xs font-semibold text-blue-700">Versão {appInfo.version}</p>
+            <p className="mt-1 text-[11px] text-blue-600/80">{appInfo.buildDate}</p>
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-sm font-bold text-gray-800">Documentos e privacidade</h4>
+            <div className="space-y-2">
+              {links.map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                >
+                  <span className="flex items-center gap-3">
+                    <span className="text-base">{link.emoji}</span>
+                    <span>{link.label}</span>
+                  </span>
+                  <span aria-hidden="true">↗</span>
+                </a>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-center text-xs text-gray-400">Desenvolvido com carinho ❤️</p>
+
+          <button onClick={onClose} className="w-full rounded-xl bg-blue-600 py-3 font-bold text-white hover:bg-blue-700">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema }) => {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(false);
+  const [territorioProcessandoId, setTerritorioProcessandoId] = useState(null);
   const temaSistema = getSistemaTheme(contextoSistema);
+  const { notify, confirm } = useUiFeedback();
 
   useEffect(() => {
     if (!isOpen || !user) return;
@@ -346,7 +506,8 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
               statusResumo,
               descricaoResumo,
               barraClasse,
-              badgeClasse
+              badgeClasse,
+              podeFinalizarDireto: progresso.isAguardandoFinalizacao && Boolean(territorioDoc.designadoPara)
             };
           });
         }
@@ -383,8 +544,53 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
       navigate(`/app?bounds=${item.boundsStr}`);
       onClose();
     } else {
-      alert("Localização não encontrada.");
+      notify("Localização não encontrada.");
       onClose();
+    }
+  };
+
+  const finalizarDireto = async (item) => {
+    if (!user?.email || !item?.podeFinalizarDireto) return;
+    if (!(await confirm({
+      title: 'Finalizar territorio',
+      message: `Confirmar a finalização do território ${item.nome || item.numeroId}?`,
+      tone: 'warning',
+      confirmLabel: 'Finalizar'
+    }))) return;
+
+    setTerritorioProcessandoId(item.id);
+
+    try {
+      const stateRef = getTerritorioStateRef(db, item.numeroId, contextoSistema?.contextoAtivoId);
+      const salvarEstadoTerritorio = async (updates) => {
+        await setDoc(stateRef, updates, { merge: true });
+      };
+
+      const resultado = await finalizarTerritorioDesignado({
+        salvarEstadoTerritorio,
+        dadosBanco: item,
+        nome: item.nome || `Território ${item.numeroId}`,
+        db,
+        contextoSistema
+      });
+
+      if (resultado.ok) {
+        setLista((listaAtual) => listaAtual.filter((territorio) => territorio.id !== item.id));
+        notify({
+          title: 'Territorio finalizado',
+          message: `Território finalizado com sucesso${resultado.contextoSufixo}.`,
+          variant: 'success'
+        });
+      }
+    } catch (error) {
+      console.error(error);
+      notify({
+        title: 'Finalizacao indisponivel',
+        message: 'Não foi possível finalizar o território agora. Tente novamente.',
+        variant: 'error'
+      });
+    } finally {
+      setTerritorioProcessandoId(null);
     }
   };
 
@@ -453,9 +659,20 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
                       </span>
                     </div>
                   </div>
-                  <button onClick={() => irParaMapa(t)} className="w-full bg-blue-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                    Ir para o Mapa
-                  </button>
+                  <div className="flex gap-2">
+                    {t.podeFinalizarDireto && (
+                      <button
+                        onClick={() => finalizarDireto(t)}
+                        disabled={territorioProcessandoId === t.id}
+                        className={`flex-1 text-white text-sm font-bold py-2 rounded-lg active:scale-95 transition-transform ${territorioProcessandoId === t.id ? 'bg-emerald-400 cursor-wait' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                      >
+                        {territorioProcessandoId === t.id ? 'Finalizando...' : 'Finalizar agora'}
+                      </button>
+                    )}
+                    <button onClick={() => irParaMapa(t)} className="flex-1 bg-blue-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                      Ir para o Mapa
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -495,9 +712,10 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
 };
 
 // --- MENU LATERAL (ATUALIZADO - ORDEM REAJUSTADA) ---
-const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda, contextoSistema, coberturaCampanha, carregandoCobertura }) => {
+const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda, abrirSobre, contextoSistema, coberturaCampanha, carregandoCobertura }) => {
   const [deferredPrompt, setDeferredPrompt] = useState(() => deferredPromptGlobal);
   const temaSistema = getSistemaTheme(contextoSistema);
+  const { notify } = useUiFeedback();
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (e) => {
@@ -520,7 +738,12 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
         deferredPromptGlobal = null;
       }
     } else {
-      alert('Para instalar: Abra o menu do navegador (três pontinhos) e procure "Adicionar à Tela Inicial" ou "Instalar Aplicativo".');
+      notify({
+        title: 'Como instalar',
+        message: 'Abra o menu do navegador (três pontinhos) e procure "Adicionar à Tela Inicial" ou "Instalar Aplicativo".',
+        variant: 'info',
+        durationMs: 7000
+      });
     }
   };
 
@@ -532,7 +755,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
       <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[2001] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
 
         {/* CABEÇALHO DO MENU */}
-        <div className={`${temaSistema.headerBg} p-6 text-white flex-shrink-0`}>
+        <div className={`${temaSistema.headerBg} app-safe-panel-header p-6 text-white flex-shrink-0`}>
           <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -637,7 +860,13 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
           <button 
             onClick={async () => {
                 const temUpdate = await checkForUpdate(true);
-                if (!temUpdate) alert("Seu sistema já está atualizado! ✅");
+                if (!temUpdate) {
+                  notify({
+                    title: 'App atualizado',
+                    message: 'Seu sistema já está atualizado.',
+                    variant: 'success'
+                  });
+                }
             }}
             className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-full shadow-sm text-blue-600 text-xs font-bold hover:bg-blue-50 hover:border-blue-200 transition-all active:scale-95"
           >
@@ -646,7 +875,20 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
             </svg>
             Verificar Atualização
           </button>
-          
+
+          <button
+            onClick={() => {
+              abrirSobre();
+              onClose();
+            }}
+            className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-full shadow-sm text-slate-700 text-xs font-bold hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Sobre o app
+          </button>
+
           <p className="mt-2 text-[10px] text-gray-300">Desenvolvido com carinho ❤️</p>
         </div>
       </div>
@@ -667,7 +909,9 @@ function Dashboard() {
   const [menuAberto, setMenuAberto] = useState(false);
   const [legendaAberta, setLegendaAberta] = useState(false);
   const [ajudaAberta, setAjudaAberta] = useState(false);
+  const [sobreAberto, setSobreAberto] = useState(false);
   const [meusTerritoriosAberto, setMeusTerritoriosAberto] = useState(false);
+  const [confirmarLogoutAberto, setConfirmarLogoutAberto] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -682,6 +926,14 @@ function Dashboard() {
   }, [navigate]);
 
   const { isAdmin, autorizado, loading: verificandoBanco, role } = useUsuario(user);
+
+  useEffect(() => {
+    if (!user || !autorizado || !Capacitor.isNativePlatform()) return;
+
+    ativarPushNotifications(user).catch((error) => {
+      console.warn('Push notifications nao puderam ser ativadas:', error);
+    });
+  }, [autorizado, user]);
 
   useEffect(() => {
     if (!user || !autorizado) return;
@@ -719,9 +971,15 @@ function Dashboard() {
     };
   }, [autorizado, contextoSistema?.contextoAtivoId, user]);
 
-  const handleLogout = () => {
-    signOut(auth);
+  const confirmarLogout = async () => {
+    setConfirmarLogoutAberto(false);
+    await desativarPushNotifications(user?.email);
+    await signOutGoogleNative();
     navigate('/');
+  };
+
+  const handleLogout = () => {
+    setConfirmarLogoutAberto(true);
   };
 
   // 1. TELA DE CARREGANDO
@@ -765,6 +1023,11 @@ function Dashboard() {
               </button>
             </div>
           </div>
+          <ModalConfirmacaoLogout
+            isOpen={confirmarLogoutAberto}
+            onConfirmar={confirmarLogout}
+            onCancelar={() => setConfirmarLogoutAberto(false)}
+          />
         </div>
       );
     }
@@ -775,6 +1038,11 @@ function Dashboard() {
           <p className="mb-6 text-gray-600">O e-mail <strong>{user.email}</strong> não possui permissão de acesso.</p>
           <button onClick={handleLogout} className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 text-gray-700">Sair</button>
         </div>
+        <ModalConfirmacaoLogout
+          isOpen={confirmarLogoutAberto}
+          onConfirmar={confirmarLogout}
+          onCancelar={() => setConfirmarLogoutAberto(false)}
+        />
       </div>
     );
   }
@@ -791,6 +1059,7 @@ function Dashboard() {
         handleLogout={handleLogout}
         abrirAjuda={() => setAjudaAberta(true)}
         abrirLegenda={() => setLegendaAberta(true)}
+        abrirSobre={() => setSobreAberto(true)}
         contextoSistema={contextoSistema}
         coberturaCampanha={coberturaCampanha}
         carregandoCobertura={coberturaCampanha.loading}
@@ -808,6 +1077,11 @@ function Dashboard() {
         isAdmin={isAdmin}
       />
 
+      <SobreModal
+        isOpen={sobreAberto}
+        onClose={() => setSobreAberto(false)}
+      />
+
       <MeusTerritoriosModal
         isOpen={meusTerritoriosAberto}
         onClose={() => setMeusTerritoriosAberto(false)}
@@ -815,9 +1089,14 @@ function Dashboard() {
         navigate={navigate}
         contextoSistema={contextoSistema}
       />
+      <ModalConfirmacaoLogout
+        isOpen={confirmarLogoutAberto}
+        onConfirmar={confirmarLogout}
+        onCancelar={() => setConfirmarLogoutAberto(false)}
+      />
 
       {/* CABEÇALHO */}
-      <div className={`h-16 ${temaSistema.headerBg} text-white shadow-md z-20 px-2.5 sm:px-4 flex items-center justify-between flex-shrink-0`}>
+      <div className={`app-safe-header min-h-16 ${temaSistema.headerBg} text-white shadow-md z-20 px-2.5 sm:px-4 flex items-center justify-between flex-shrink-0`}>
         
         {/* LADO ESQUERDO: LOGO (Mobile) vs TÍTULO (Desktop) */}
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
@@ -974,18 +1253,77 @@ function LazyPage({ children }) {
   );
 }
 
+function AndroidBackButtonHandler() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const ultimaTentativaSaidaRef = useRef(0);
+  const { notify } = useUiFeedback();
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+      return undefined;
+    }
+
+    let listenerHandle = null;
+
+    const registrar = async () => {
+      listenerHandle = await CapacitorApp.addListener('backButton', () => {
+        const rotaAtual = location.pathname;
+
+        if (rotaAtual === '/admin' || rotaAtual === '/relatorios') {
+          navigate('/app');
+          return;
+        }
+
+        if (rotaAtual !== '/' && rotaAtual !== '/app') {
+          navigate(-1);
+          return;
+        }
+
+        const agora = Date.now();
+        if (agora - ultimaTentativaSaidaRef.current <= 5000) {
+          void CapacitorApp.exitApp();
+          return;
+        }
+
+        ultimaTentativaSaidaRef.current = agora;
+        notify({
+          title: 'Pressione novamente para sair',
+          message: 'Toque em voltar outra vez em ate 5 segundos para fechar o app.',
+          variant: 'info',
+          durationMs: 3000
+        });
+      });
+    };
+
+    void registrar();
+
+    return () => {
+      if (listenerHandle) {
+        void listenerHandle.remove();
+      }
+    };
+  }, [location.pathname, navigate, notify]);
+
+  return null;
+}
+
 // --- APP PRINCIPAL ---
 function App() {
   return (
-    <HashRouter>
-      <AutoUpdate />
-      <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/app" element={<Dashboard />} />
-        <Route path="/admin" element={<RouteGuard adminOnly><LazyPage><AdminPanel /></LazyPage></RouteGuard>} />
-        <Route path="/relatorios" element={<RouteGuard adminOnly><LazyPage><Relatorios /></LazyPage></RouteGuard>} />
-      </Routes>
-    </HashRouter>
+    <UiFeedbackProvider>
+      <HashRouter>
+        <AndroidBackButtonHandler />
+        <AutoUpdate />
+        <Routes>
+          <Route path="/" element={<Login />} />
+          <Route path="/app" element={<Dashboard />} />
+          <Route path="/admin" element={<RouteGuard adminOnly><LazyPage><AdminPanel /></LazyPage></RouteGuard>} />
+          <Route path="/relatorios" element={<RouteGuard adminOnly><LazyPage><Relatorios /></LazyPage></RouteGuard>} />
+          <Route path="*" element={<Navigate to={auth.currentUser ? '/app' : '/'} replace />} />
+        </Routes>
+      </HashRouter>
+    </UiFeedbackProvider>
   );
 }
 

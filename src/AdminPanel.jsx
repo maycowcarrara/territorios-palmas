@@ -5,6 +5,8 @@ import { db } from './firebase';
 import { useSistema } from './useSistema';
 import { getDefaultSistemaConfig, getSistemaTheme, slugifyCampanha } from './sistema';
 import { getTerritorioContextCollectionRef } from './territorioContext';
+import { useUiFeedback } from './uiFeedback';
+import { enviarComunicadoPeloRelay, relayDisponivel } from './notificationRelay';
 
 const AdminPanel = () => {
     const [usuarios, setUsuarios] = useState([]);
@@ -19,12 +21,16 @@ const AdminPanel = () => {
     const [excluindoCampanha, setExcluindoCampanha] = useState(false);
     const { config: contextoSistema } = useSistema();
     const temaSistema = getSistemaTheme(contextoSistema);
+    const { notify, confirm } = useUiFeedback();
 
     // Estados para NOVO usuário
     const [novoEmail, setNovoEmail] = useState('');
     const [novoNome, setNovoNome] = useState('');
     const [novoWhats, setNovoWhats] = useState('');
     const [loadingAdd, setLoadingAdd] = useState(false);
+    const [comunicadoGeral, setComunicadoGeral] = useState('');
+    const [enviandoComunicado, setEnviandoComunicado] = useState(false);
+    const [destinoComunicado, setDestinoComunicado] = useState('todos');
 
     // Estados para EDIÇÃO inline
     const [editandoId, setEditandoId] = useState(null);
@@ -118,18 +124,30 @@ const AdminPanel = () => {
 
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(novoEmail)) {
-            alert("❌ E-mail inválido! Por favor, verifique o formato.");
+            notify({
+                title: 'E-mail invalido',
+                message: 'Por favor, verifique o formato informado.',
+                variant: 'warning'
+            });
             return;
         }
 
         if (!novoEmail.includes('@gmail.com')) {
-            alert("❌ Por favor, use um e-mail @gmail.com para compatibilidade com o login.");
+            notify({
+                title: 'Use um Gmail',
+                message: 'Use um e-mail @gmail.com para manter a compatibilidade com o login.',
+                variant: 'warning'
+            });
             return;
         }
 
         const whatsLimpo = novoWhats.replace(/\D/g, '');
         if (novoWhats && (whatsLimpo.length < 10 || whatsLimpo.length > 11)) {
-            alert("❌ WhatsApp inválido! O número deve ter DDD + 8 ou 9 dígitos.");
+            notify({
+                title: 'WhatsApp invalido',
+                message: 'O número deve ter DDD + 8 ou 9 dígitos.',
+                variant: 'warning'
+            });
             return;
         }
 
@@ -146,10 +164,18 @@ const AdminPanel = () => {
             setNovoEmail('');
             setNovoNome('');
             setNovoWhats('');
-            alert("✅ Usuário adicionado com sucesso!");
+            notify({
+                title: 'Usuario cadastrado',
+                message: 'Usuário adicionado com sucesso.',
+                variant: 'success'
+            });
         } catch (error) {
             console.error("Erro ao adicionar:", error);
-            alert("❌ Erro: Verifique permissões.");
+            notify({
+                title: 'Cadastro bloqueado',
+                message: 'Verifique suas permissões e tente novamente.',
+                variant: 'error'
+            });
         }
         setLoadingAdd(false);
     };
@@ -161,22 +187,44 @@ const AdminPanel = () => {
             ? `⚠️ ATENÇÃO: Você está prestes a tornar ${user.nome || user.id} um ADMINISTRADOR.\n\nEle terá acesso total ao sistema, incluindo edição e exclusão de dados.\n\nDeseja continuar?`
             : `Deseja remover as permissões de administrador de ${user.nome || user.id}?`;
 
-        if (confirm(alerta)) {
-            try {
-                await updateDoc(doc(db, "usuarios", user.id), { role: novaRole });
-            } catch {
-                alert("Erro ao mudar permissão.");
-            }
+        if (!(await confirm({
+            title: novaRole === 'admin' ? 'Promover para admin' : 'Remover permissao de admin',
+            message: alerta,
+            tone: novaRole === 'admin' ? 'warning' : 'danger',
+            confirmLabel: novaRole === 'admin' ? 'Promover' : 'Remover'
+        }))) {
+            return;
+        }
+
+        try {
+            await updateDoc(doc(db, "usuarios", user.id), { role: novaRole });
+        } catch {
+            notify({
+                title: 'Permissao nao alterada',
+                message: 'Não foi possível mudar a permissão agora.',
+                variant: 'error'
+            });
         }
     };
 
     const remover = async (email) => {
-        if (confirm(`Tem certeza que deseja EXCLUIR DEFINITIVAMENTE o usuário ${email}?\n\nEssa ação não pode ser desfeita.`)) {
-            try {
-                await deleteDoc(doc(db, "usuarios", email));
-            } catch {
-                alert("Erro ao remover.");
-            }
+        if (!(await confirm({
+            title: 'Excluir usuario',
+            message: `Tem certeza que deseja excluir definitivamente o usuário ${email}?\n\nEssa ação não pode ser desfeita.`,
+            tone: 'danger',
+            confirmLabel: 'Excluir'
+        }))) {
+            return;
+        }
+
+        try {
+            await deleteDoc(doc(db, "usuarios", email));
+        } catch {
+            notify({
+                title: 'Usuario nao removido',
+                message: 'Não foi possível remover esse usuário agora.',
+                variant: 'error'
+            });
         }
     };
 
@@ -202,12 +250,127 @@ const AdminPanel = () => {
             setEditandoId(null);
         } catch (error) {
             console.error(error);
-            alert("Erro ao salvar alterações.");
+            notify({
+                title: 'Edicao nao salva',
+                message: 'Não foi possível salvar as alterações.',
+                variant: 'error'
+            });
         }
     };
 
     const handleEditChange = (campo, valor) => {
         setDadosEditados(prev => ({ ...prev, [campo]: valor }));
+    };
+
+    const enviarComunicadoGeral = async (e) => {
+        e.preventDefault();
+
+        const mensagem = comunicadoGeral.trim();
+        const destinatarios = usuarios.filter((user) => user.role === 'admin' || user.role === 'comum');
+        const admins = usuarios.filter((user) => user.role === 'admin');
+
+        if (!mensagem) {
+            notify({
+                title: 'Mensagem obrigatoria',
+                message: 'Digite a mensagem do comunicado.',
+                variant: 'warning'
+            });
+            return;
+        }
+
+        if (destinoComunicado === 'admins' && admins.length === 0) {
+            notify({
+                title: 'Sem destinatarios',
+                message: 'Não há administradores para receber o comunicado.',
+                variant: 'warning'
+            });
+            return;
+        }
+
+        if (destinoComunicado === 'todos' && destinatarios.length === 0) {
+            notify({
+                title: 'Sem destinatarios',
+                message: 'Não há usuários aprovados para receber o comunicado.',
+                variant: 'warning'
+            });
+            return;
+        }
+
+        const totalDestino = destinoComunicado === 'admins' ? admins.length : destinatarios.length;
+        const rotuloDestino = destinoComunicado === 'admins' ? 'admin(s)' : 'usuário(s)';
+
+        if (!(await confirm({
+            title: 'Enviar comunicado',
+            message: `Enviar este comunicado para ${totalDestino} ${rotuloDestino}?`,
+            tone: 'warning',
+            confirmLabel: 'Enviar'
+        }))) {
+            return;
+        }
+
+        setEnviandoComunicado(true);
+
+        try {
+            if (relayDisponivel()) {
+                await enviarComunicadoPeloRelay({
+                    destino: destinoComunicado,
+                    mensagem
+                });
+            } else {
+                const agora = new Date();
+                if (destinoComunicado === 'admins') {
+                    const notificacaoRef = doc(collection(db, "notificacoes"));
+                    await setDoc(notificacaoRef, {
+                        para: 'ADMINS',
+                        texto: mensagem,
+                        data: agora,
+                        lida: false,
+                        tipo: 'comunicado',
+                        origem: 'admin'
+                    });
+                } else {
+                    const batchSize = 400;
+
+                    for (let index = 0; index < destinatarios.length; index += batchSize) {
+                        const batch = writeBatch(db);
+
+                        destinatarios
+                            .slice(index, index + batchSize)
+                            .forEach((user) => {
+                                const notificacaoRef = doc(collection(db, "notificacoes"));
+                                batch.set(notificacaoRef, {
+                                    para: user.id,
+                                    texto: mensagem,
+                                    data: agora,
+                                    lida: false,
+                                    tipo: 'comunicado',
+                                    origem: 'admin'
+                                });
+                            });
+
+                        await batch.commit();
+                    }
+                }
+            }
+
+            setComunicadoGeral('');
+            notify({
+                title: 'Comunicado enviado',
+                message: relayDisponivel()
+                    ? `Comunicado enviado para ${totalDestino} ${rotuloDestino}, com push para quem tiver FCM ativo.`
+                    : `Comunicado enviado para ${totalDestino} ${rotuloDestino}.`,
+                variant: 'success'
+            });
+        } catch (error) {
+            console.error("Erro ao enviar comunicado geral:", error);
+            notify({
+                title: 'Envio indisponivel',
+                message: String(error?.message || 'Não foi possível enviar o comunicado geral.'),
+                variant: 'error'
+            });
+        } finally {
+            setEnviandoComunicado(false);
+        }
     };
 
     const ativarCampanha = async ({ id, titulo }) => {
@@ -235,10 +398,18 @@ const AdminPanel = () => {
 
             setCampanhaTitulo('');
             setCampanhaSlug('');
-            alert(`✅ Campanha "${titulo}" ativada com sucesso!`);
+            notify({
+                title: 'Campanha ativada',
+                message: `Campanha "${titulo}" ativada com sucesso.`,
+                variant: 'success'
+            });
         } catch (error) {
             console.error("Erro ao ativar campanha:", error);
-            alert("❌ Não foi possível ativar a campanha.");
+            notify({
+                title: 'Campanha nao ativada',
+                message: 'Não foi possível ativar a campanha.',
+                variant: 'error'
+            });
         } finally {
             setSalvandoCampanha(false);
         }
@@ -250,12 +421,20 @@ const AdminPanel = () => {
         const id = slugifyCampanha(campanhaSlug || titulo);
 
         if (!titulo) {
-            alert("Informe o título da campanha.");
+            notify({
+                title: 'Titulo obrigatorio',
+                message: 'Informe o título da campanha.',
+                variant: 'warning'
+            });
             return;
         }
 
         if (!id) {
-            alert("Não consegui gerar um identificador válido para a campanha.");
+            notify({
+                title: 'Identificador invalido',
+                message: 'Não consegui gerar um identificador válido para a campanha.',
+                variant: 'error'
+            });
             return;
         }
 
@@ -263,7 +442,12 @@ const AdminPanel = () => {
     };
 
     const voltarModoNormal = async () => {
-        if (!confirm("Voltar o sistema para a pregação normal agora?")) return;
+        if (!(await confirm({
+            title: 'Desativar campanha',
+            message: 'Voltar o sistema para a pregação normal agora?',
+            tone: 'warning',
+            confirmLabel: 'Voltar ao normal'
+        }))) return;
 
         setSalvandoCampanha(true);
         try {
@@ -274,10 +458,18 @@ const AdminPanel = () => {
                 nome_campanha: '',
                 atualizadaEm: new Date()
             }, { merge: true });
-            alert("✅ Sistema voltou para o modo normal.");
+            notify({
+                title: 'Modo normal ativo',
+                message: 'Sistema voltou para o modo normal.',
+                variant: 'success'
+            });
         } catch (error) {
             console.error("Erro ao voltar para o modo normal:", error);
-            alert("❌ Não foi possível voltar para o modo normal.");
+            notify({
+                title: 'Mudanca nao concluida',
+                message: 'Não foi possível voltar para o modo normal.',
+                variant: 'error'
+            });
         } finally {
             setSalvandoCampanha(false);
         }
@@ -299,12 +491,20 @@ const AdminPanel = () => {
         if (!campanhaParaExcluir) return;
 
         if (contextoSistema.contextoAtivoId === campanhaParaExcluir.id) {
-            alert("Desative a campanha antes de excluir.");
+            notify({
+                title: 'Campanha em uso',
+                message: 'Desative a campanha antes de excluir.',
+                variant: 'warning'
+            });
             return;
         }
 
         if (confirmacaoExclusao.trim() !== campanhaParaExcluir.id) {
-            alert("Digite o identificador exato da campanha para confirmar a exclusão.");
+            notify({
+                title: 'Confirmacao incompleta',
+                message: 'Digite o identificador exato da campanha para confirmar a exclusão.',
+                variant: 'warning'
+            });
             return;
         }
 
@@ -332,10 +532,18 @@ const AdminPanel = () => {
             }
 
             fecharModalExclusaoCampanha(true);
-            alert(`✅ Campanha "${campanhaExcluida.titulo || campanhaExcluida.id}" excluída com sucesso.`);
+            notify({
+                title: 'Campanha excluida',
+                message: `Campanha "${campanhaExcluida.titulo || campanhaExcluida.id}" excluída com sucesso.`,
+                variant: 'success'
+            });
         } catch (error) {
             console.error("Erro ao excluir campanha:", error);
-            alert("❌ Não foi possível excluir a campanha.");
+            notify({
+                title: 'Exclusao nao concluida',
+                message: 'Não foi possível excluir a campanha.',
+                variant: 'error'
+            });
         } finally {
             setExcluindoCampanha(false);
         }
@@ -345,6 +553,8 @@ const AdminPanel = () => {
     const totalUsers = usuarios.length;
     const totalAdmins = usuarios.filter(u => u.role === 'admin').length;
     const totalPendentes = usuarios.filter(u => u.role === 'aguardando').length;
+    const totalAprovados = usuarios.filter(u => u.role === 'admin' || u.role === 'comum').length;
+    const totalDestinoComunicado = destinoComunicado === 'admins' ? totalAdmins : totalAprovados;
     const formatarTelefone = (valor) => {
         return valor
             .replace(/\D/g, '')
@@ -526,6 +736,68 @@ const AdminPanel = () => {
                                 </div>
                             </div>
                         )}
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-8">
+                    <div className="p-4 bg-amber-50 border-b border-amber-100">
+                        <h3 className="font-bold text-amber-900 flex items-center gap-2">
+                            🔔 Comunicado Geral
+                        </h3>
+                    </div>
+                    <div className="p-5">
+                        <form onSubmit={enviarComunicadoGeral} className="space-y-4">
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Destino</label>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                    <label className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${destinoComunicado === 'todos' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                                        <input
+                                            type="radio"
+                                            name="destino-comunicado"
+                                            value="todos"
+                                            checked={destinoComunicado === 'todos'}
+                                            onChange={(e) => setDestinoComunicado(e.target.value)}
+                                        />
+                                        <span className="text-sm font-semibold text-gray-700">Todos os aprovados</span>
+                                    </label>
+                                    <label className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${destinoComunicado === 'admins' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                                        <input
+                                            type="radio"
+                                            name="destino-comunicado"
+                                            value="admins"
+                                            checked={destinoComunicado === 'admins'}
+                                            onChange={(e) => setDestinoComunicado(e.target.value)}
+                                        />
+                                        <span className="text-sm font-semibold text-gray-700">Somente admins</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Mensagem para todos os usuários aprovados</label>
+                                <textarea
+                                    rows={4}
+                                    placeholder="Ex: O app foi atualizado. Fechem e abram novamente para carregar a nova versão."
+                                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-amber-400 focus:border-transparent outline-none transition-all resize-y"
+                                    value={comunicadoGeral}
+                                    onChange={(e) => setComunicadoGeral(e.target.value)}
+                                />
+                            </div>
+                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                <p className="text-sm text-gray-500">
+                                    Envia uma notificação interna para <span className="font-bold text-gray-700">{totalDestinoComunicado}</span> {destinoComunicado === 'admins' ? 'admin(s)' : 'usuário(s) aprovados'}.
+                                    {relayDisponivel()
+                                        ? ' Quem tiver o app com FCM ativo também pode receber push mesmo com o app fechado.'
+                                        : ' Quem estiver com o app aberto recebe na hora; quem abrir depois vê no sininho.'}
+                                </p>
+                                <button
+                                    type="submit"
+                                    disabled={enviandoComunicado || totalDestinoComunicado === 0}
+                                    className="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all active:scale-95 disabled:opacity-50"
+                                >
+                                    {enviandoComunicado ? 'Enviando...' : 'Enviar Comunicado'}
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
 

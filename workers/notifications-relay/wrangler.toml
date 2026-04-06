@@ -1,0 +1,7 @@
+name = "territorios-notifications-relay"
+main = "src/index.js"
+compatibility_date = "2026-04-04"
+
+[vars]
+FIREBASE_PROJECT_ID = "territorios-palmas"
+FIREBASE_WEB_API_KEY = "AIzaSyBmR4PilWSpPeP_TNWi7LCn9iGso3xnWI8"

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker, Polyline } from 'react-leaflet';
 import { onSnapshot, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, query, where, deleteField } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
 import { db } from './firebase';
 import { loadMapaData } from './mapData';
 import { getFeatureId } from './mapaUtils';
@@ -15,10 +17,19 @@ import {
     TERRITORIO_STATUS
 } from './territorioContext';
 import { isNormalContext } from './sistema';
+import { finalizarTerritorioDesignado } from './territorioActions';
 import L from 'leaflet';
+import { useUiFeedback } from './uiFeedback';
+import { enviarEventoNotificacaoPeloRelay, relayDisponivel } from './notificationRelay';
 
 // --- CSS ---
 const cssTooltip = `
+  @keyframes gps-pulse {
+    0% { transform: scale(0.72); opacity: 0.75; }
+    70% { transform: scale(1.15); opacity: 0; }
+    100% { transform: scale(1.2); opacity: 0; }
+  }
+
   .label-territorio { background: transparent; border: none; box-shadow: none; font-family: 'Bahnschrift', sans-serif-condensed, sans-serif; text-align: center; line-height: 1.1; pointer-events: none; }
   .label-nome { font-weight: 700; font-size: 14px; color: #1e3a8a; text-shadow: 2px 0 #fff, -2px 0 #fff, 0 2px #fff, 0 -2px #fff, 1px 1px #fff, -1px -1px #fff; display: block; font-stretch: condensed; letter-spacing: -0.5px; margin-bottom: 2px; white-space: normal; max-width: 140px; margin-left: auto; margin-right: auto; }
   .label-status { font-size: 11px; font-weight: 700; color: #444; text-shadow: 1px 1px 0px rgba(255,255,255,0.9); background-color: rgba(255,255,255,0.7); padding: 1px 6px; border-radius: 8px; display: inline-block; }
@@ -70,6 +81,43 @@ const calcularCentroide = (coords) => {
     coords.forEach(p => { lat += p[1]; lng += p[0]; });
     return { lat: lat / n, lng: lng / n };
 };
+
+const toRad = (value) => (value * Math.PI) / 180;
+
+const calcularDistanciaMetros = (origem, destino) => {
+    if (!origem || !destino) return 0;
+
+    const raioTerra = 6371000;
+    const deltaLat = toRad(destino.lat - origem.lat);
+    const deltaLng = toRad(destino.lng - origem.lng);
+    const lat1 = toRad(origem.lat);
+    const lat2 = toRad(destino.lat);
+
+    const a = Math.sin(deltaLat / 2) ** 2
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+
+    return 2 * raioTerra * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const calcularRumo = (origem, destino) => {
+    if (!origem || !destino) return null;
+
+    const lat1 = toRad(origem.lat);
+    const lat2 = toRad(destino.lat);
+    const deltaLng = toRad(destino.lng - origem.lng);
+
+    const y = Math.sin(deltaLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2)
+        - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
+
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+};
+
+const DISTANCIA_MINIMA_ATUALIZACAO_METROS = 0.8;
+const DISTANCIA_MINIMA_TRILHA_METROS = 3;
+const DISTANCIA_MINIMA_DIRECAO_METROS = 2;
+const PRECISAO_MAXIMA_INICIAL_METROS = 120;
+const PRECISAO_MAXIMA_RASTREAMENTO_METROS = 80;
 
 // --- DEEP LINK HANDLER ---
 const DeepLinkHandler = () => {
@@ -148,26 +196,241 @@ const ControleVisibilidade = ({ ocultarCores, setOcultarCores }) => {
     );
 };
 
-const ControlesNavegacao = ({ setPosicaoUsuario }) => {
+const ControlesNavegacao = ({
+    rastreandoLocalizacao,
+    setRastreandoLocalizacao,
+    setPosicaoUsuario,
+    setTrilhaUsuario,
+    setDirecaoUsuario
+}) => {
     const map = useMap();
+    const { notify } = useUiFeedback();
     const [buscando, setBuscando] = useState(false);
+    const watchIdRef = useRef(null);
+    const primeiraCentralizacaoRef = useRef(false);
+    const ultimaPosicaoBrutaRef = useRef(null);
+    const ultimaPosicaoAceitaRef = useRef(null);
+    const limparDirecaoTimeoutRef = useRef(null);
 
-    const encontrarUsuario = () => {
-        setBuscando(true);
-        map.locate().on("locationfound", function (e) {
-            setPosicaoUsuario(e.latlng);
-            map.flyTo(e.latlng, 17);
+    useEffect(() => {
+        const limparRastreamentoVisual = () => {
+            setPosicaoUsuario(null);
+            setTrilhaUsuario([]);
+            setDirecaoUsuario(null);
+            ultimaPosicaoBrutaRef.current = null;
+            ultimaPosicaoAceitaRef.current = null;
+            primeiraCentralizacaoRef.current = false;
             setBuscando(false);
-        }).on("locationerror", function () {
-            alert("Ative o GPS.");
+            if (limparDirecaoTimeoutRef.current) {
+                window.clearTimeout(limparDirecaoTimeoutRef.current);
+                limparDirecaoTimeoutRef.current = null;
+            }
+        };
+
+        const pararWatch = () => {
+            if (watchIdRef.current === null) return;
+
+            if (Capacitor.isNativePlatform()) {
+                void Geolocation.clearWatch({ id: watchIdRef.current });
+            } else if (navigator.geolocation) {
+                navigator.geolocation.clearWatch(watchIdRef.current);
+            }
+
+            watchIdRef.current = null;
+        };
+
+        if (!rastreandoLocalizacao) {
+            pararWatch();
+            limparRastreamentoVisual();
+            return undefined;
+        }
+
+        if (!Capacitor.isNativePlatform() && !navigator.geolocation) {
+            notify({
+                title: 'Localizacao indisponivel',
+                message: 'Seu navegador não suporta localização.',
+                variant: 'warning'
+            });
+            setRastreandoLocalizacao(false);
+            return undefined;
+        }
+
+        const processarPosicao = (position) => {
+            const novaPosicao = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude
+            };
+            const precisao = position.coords.accuracy ?? null;
+            const ultimaPosicaoAceita = ultimaPosicaoAceitaRef.current;
+
+            if (!ultimaPosicaoAceita && precisao && precisao > PRECISAO_MAXIMA_INICIAL_METROS) {
+                return;
+            }
+
+            if (ultimaPosicaoAceita && precisao && precisao > PRECISAO_MAXIMA_RASTREAMENTO_METROS) {
+                setBuscando(false);
+                return;
+            }
+
+            if (ultimaPosicaoAceita) {
+                const deslocamentoCurto = calcularDistanciaMetros(ultimaPosicaoAceita, novaPosicao);
+                if (deslocamentoCurto < DISTANCIA_MINIMA_ATUALIZACAO_METROS) {
+                    setBuscando(false);
+                    return;
+                }
+            }
+
+            ultimaPosicaoAceitaRef.current = novaPosicao;
+
+            setPosicaoUsuario(novaPosicao);
+
+            setTrilhaUsuario((caminhoAtual) => {
+                if (!caminhoAtual.length) return [novaPosicao];
+
+                const ultimaPosicaoTrilha = caminhoAtual[caminhoAtual.length - 1];
+                if (calcularDistanciaMetros(ultimaPosicaoTrilha, novaPosicao) < DISTANCIA_MINIMA_TRILHA_METROS) {
+                    return caminhoAtual;
+                }
+
+                return [...caminhoAtual, novaPosicao];
+            });
+
+            if (!primeiraCentralizacaoRef.current) {
+                primeiraCentralizacaoRef.current = true;
+                map.flyTo(novaPosicao, Math.max(map.getZoom(), 17), { animate: true, duration: 1.2 });
+            }
+
+            if (ultimaPosicaoBrutaRef.current) {
+                const distanciaPercorrida = calcularDistanciaMetros(ultimaPosicaoBrutaRef.current, novaPosicao);
+                if (distanciaPercorrida >= DISTANCIA_MINIMA_DIRECAO_METROS) {
+                    setDirecaoUsuario(calcularRumo(ultimaPosicaoBrutaRef.current, novaPosicao));
+                    ultimaPosicaoBrutaRef.current = novaPosicao;
+
+                    if (limparDirecaoTimeoutRef.current) {
+                        window.clearTimeout(limparDirecaoTimeoutRef.current);
+                    }
+
+                    limparDirecaoTimeoutRef.current = window.setTimeout(() => {
+                        setDirecaoUsuario(null);
+                    }, 2000);
+                }
+            } else {
+                ultimaPosicaoBrutaRef.current = novaPosicao;
+            }
+
             setBuscando(false);
-        });
+        };
+
+        const tratarErro = (error) => {
+            console.error("Erro ao obter localização:", error);
+            setBuscando(false);
+
+            if (error?.code === 1 || error?.code === 'NOT_AUTHORIZED') {
+                pararWatch();
+                setRastreandoLocalizacao(false);
+                notify({
+                    title: 'Permissao de localizacao',
+                    message: 'Permita o acesso à localização do app para usar o GPS do celular.',
+                    variant: 'warning'
+                });
+                return;
+            }
+
+            if (!ultimaPosicaoBrutaRef.current) {
+                pararWatch();
+                setRastreandoLocalizacao(false);
+                notify({
+                    title: 'GPS necessario',
+                    message: 'Ative o GPS do celular para usar a sua localização no mapa.',
+                    variant: 'warning'
+                });
+            }
+        };
+
+        const iniciarRastreamento = async () => {
+            setBuscando(true);
+
+            if (Capacitor.isNativePlatform()) {
+                try {
+                    let permissaoLocalizacao = await Geolocation.checkPermissions();
+                    if (permissaoLocalizacao.location !== 'granted' && permissaoLocalizacao.coarseLocation !== 'granted') {
+                        permissaoLocalizacao = await Geolocation.requestPermissions();
+                    }
+
+                    if (permissaoLocalizacao.location === 'denied' && permissaoLocalizacao.coarseLocation === 'denied') {
+                        throw { code: 'NOT_AUTHORIZED' };
+                    }
+
+                    watchIdRef.current = await Geolocation.watchPosition(
+                        {
+                            enableHighAccuracy: true,
+                            maximumAge: 1500,
+                            timeout: 10000
+                        },
+                        (position, error) => {
+                            if (error) {
+                                tratarErro(error);
+                                return;
+                            }
+
+                            if (position) {
+                                processarPosicao(position);
+                            }
+                        }
+                    );
+                    return;
+                } catch (error) {
+                    tratarErro(error);
+                    return;
+                }
+            }
+
+            watchIdRef.current = navigator.geolocation.watchPosition(
+                processarPosicao,
+                tratarErro,
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 1500,
+                    timeout: 10000
+                }
+            );
+        };
+
+        void iniciarRastreamento();
+
+        return () => {
+            pararWatch();
+            if (limparDirecaoTimeoutRef.current) {
+                window.clearTimeout(limparDirecaoTimeoutRef.current);
+                limparDirecaoTimeoutRef.current = null;
+            }
+        };
+    }, [map, notify, rastreandoLocalizacao, setDirecaoUsuario, setPosicaoUsuario, setRastreandoLocalizacao, setTrilhaUsuario]);
+
+    const alternarLocalizacao = () => {
+        setRastreandoLocalizacao((estadoAtual) => !estadoAtual);
     };
 
     return (
         <div className="absolute bottom-6 right-4 z-[400] flex flex-col gap-3">
-            <button onClick={encontrarUsuario} className="bg-white w-12 h-12 flex items-center justify-center shadow-xl border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all duration-200 rounded-full mb-2 text-blue-600">
-                {buscando ? <div className="animate-spin rounded-full h-5 w-5 border-2 border-slate-300 border-t-blue-600"></div> : <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" /></svg>}
+            <button
+                onClick={alternarLocalizacao}
+                aria-pressed={rastreandoLocalizacao}
+                title={rastreandoLocalizacao ? "Desativar rastreamento da minha localização" : "Ativar rastreamento da minha localização"}
+                className={`relative w-12 h-12 flex items-center justify-center shadow-xl border active:scale-95 transition-all duration-200 rounded-full mb-2 ${rastreandoLocalizacao ? 'bg-blue-600 text-white border-blue-700 shadow-blue-500/30' : 'bg-white text-blue-600 border-slate-200 hover:bg-slate-50'}`}
+            >
+                {buscando ? (
+                    <div className={`animate-spin rounded-full h-5 w-5 border-2 ${rastreandoLocalizacao ? 'border-blue-100 border-t-white' : 'border-slate-300 border-t-blue-600'}`}></div>
+                ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <circle cx="12" cy="12" r="10" />
+                        <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
+                    </svg>
+                )}
+                <span className={`absolute left-1/2 -translate-x-1/2 -top-3 flex items-center gap-1 rounded-full px-1.5 py-0.5 border shadow-sm text-[9px] font-bold tracking-wide ${rastreandoLocalizacao ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-slate-500 border-slate-200'}`}>
+                    <span className={`block w-1.5 h-1.5 rounded-full ${rastreandoLocalizacao ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                    {rastreandoLocalizacao ? 'ON' : 'OFF'}
+                </span>
             </button>
             <div className="flex flex-col shadow-xl rounded-xl overflow-hidden border border-slate-200 bg-white">
                 <button onClick={() => map.zoomIn()} className="w-12 h-12 flex items-center justify-center text-slate-600 border-b border-slate-100"><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
@@ -177,19 +440,100 @@ const ControlesNavegacao = ({ setPosicaoUsuario }) => {
     );
 };
 
-const MarcadorUsuario = ({ posicao }) => {
-    if (!posicao) return null;
+const MarcadorUsuario = ({ posicao, direcao }) => {
+    const [posicaoAnimada, setPosicaoAnimada] = useState(posicao);
+    const frameAnimacaoRef = useRef(null);
+    const posicaoAnimadaRef = useRef(posicao);
+
+    useEffect(() => {
+        if (!posicao) {
+            if (frameAnimacaoRef.current) {
+                window.cancelAnimationFrame(frameAnimacaoRef.current);
+                frameAnimacaoRef.current = null;
+            }
+            posicaoAnimadaRef.current = null;
+            setPosicaoAnimada(null);
+            return undefined;
+        }
+
+        if (!posicaoAnimadaRef.current) {
+            posicaoAnimadaRef.current = posicao;
+            setPosicaoAnimada(posicao);
+            return undefined;
+        }
+
+        const origem = posicaoAnimadaRef.current;
+        const distancia = calcularDistanciaMetros(origem, posicao);
+
+        if (distancia < 0.4) {
+            posicaoAnimadaRef.current = posicao;
+            setPosicaoAnimada(posicao);
+            return undefined;
+        }
+
+        if (frameAnimacaoRef.current) {
+            window.cancelAnimationFrame(frameAnimacaoRef.current);
+        }
+
+        const inicio = performance.now();
+        const duracao = 850;
+
+        const animar = (agora) => {
+            const progresso = Math.min((agora - inicio) / duracao, 1);
+            const easing = 1 - ((1 - progresso) ** 3);
+            const proximaPosicao = {
+                lat: origem.lat + ((posicao.lat - origem.lat) * easing),
+                lng: origem.lng + ((posicao.lng - origem.lng) * easing)
+            };
+
+            posicaoAnimadaRef.current = proximaPosicao;
+            setPosicaoAnimada(proximaPosicao);
+
+            if (progresso < 1) {
+                frameAnimacaoRef.current = window.requestAnimationFrame(animar);
+                return;
+            }
+
+            frameAnimacaoRef.current = null;
+        };
+
+        frameAnimacaoRef.current = window.requestAnimationFrame(animar);
+
+        return () => {
+            if (frameAnimacaoRef.current) {
+                window.cancelAnimationFrame(frameAnimacaoRef.current);
+                frameAnimacaoRef.current = null;
+            }
+        };
+    }, [posicao]);
+
+    const posicaoExibida = posicaoAnimada ?? posicao;
+
+    const iconeGPS = useMemo(() => L.divIcon({
+        className: 'bg-transparent',
+        html: `
+            <div style="position: relative; width: 54px; height: 54px; display: flex; align-items: center; justify-content: center;">
+                <div style="position: absolute; width: 38px; height: 38px; border-radius: 9999px; background: rgba(59, 130, 246, 0.18); animation: gps-pulse 1.8s ease-out infinite;"></div>
+                ${typeof direcao === 'number' ? `
+                    <div style="position: absolute; top: 5px; left: 50%; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 16px solid #1d4ed8; transform: translateX(-50%) rotate(${direcao}deg); transform-origin: 50% 21px; filter: drop-shadow(0 2px 3px rgba(30, 64, 175, 0.3));"></div>
+                ` : ''}
+                <div style="position: relative; width: 18px; height: 18px; border-radius: 9999px; background: #2563eb; border: 3px solid #ffffff; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.45); z-index: 2;"></div>
+            </div>
+        `,
+        iconSize: [54, 54],
+        iconAnchor: [27, 27]
+    }), [direcao]);
+
+    if (!posicaoExibida) return null;
 
     const compartilharLocalizacao = () => {
-        const linkGoogle = `https://www.google.com/maps?q=${posicao.lat},${posicao.lng}`;
+        const linkGoogle = `https://www.google.com/maps?q=${posicaoExibida.lat},${posicaoExibida.lng}`;
         const textoEncoded = encodeURIComponent(`*Minha localização no território:*\n\n${linkGoogle}`);
         window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
     };
 
-    const iconeGPS = L.divIcon({ className: 'bg-transparent', html: `<div class="flex items-center justify-center relative w-16 h-16 -ml-4 -mt-4"><div class="absolute w-12 h-12 bg-blue-500/30 rounded-full animate-pulse"></div><div class="relative w-5 h-5 bg-blue-600 border-[3px] border-white rounded-full shadow-lg z-10"></div></div>`, iconSize: [20, 20], iconAnchor: [10, 10] });
-
     return (
-        <Marker position={posicao} icon={iconeGPS}>
+        <Marker position={posicaoExibida} icon={iconeGPS}>
             <Popup>
                 <div className="text-center p-1">
                     <p className="font-bold text-sm mb-2 text-gray-700">Você está aqui</p>
@@ -321,6 +665,39 @@ const ModalNota = ({ isOpen, onClose, onAdicionar, onEditar, onExcluir, dados, u
     );
 };
 
+const ModalConfirmacaoFinalizacao = ({ isOpen, onConfirmar, onRecusar, loading, contextoSufixo }) => {
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" style={{ zIndex: 9999 }}>
+            <div className="w-full max-w-sm overflow-hidden rounded-xl bg-white shadow-2xl">
+                <div className="bg-blue-600 px-4 py-3">
+                    <h3 className="text-lg font-bold text-white">Confirmar finalização</h3>
+                </div>
+                <div className="p-4 text-sm text-gray-700">
+                    <p>Você finalizou o território{contextoSufixo}?</p>
+                </div>
+                <div className="flex gap-3 px-4 pb-4">
+                    <button
+                        onClick={onConfirmar}
+                        disabled={loading}
+                        className="flex-1 rounded-lg bg-blue-600 px-4 py-2 font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        Sim
+                    </button>
+                    <button
+                        onClick={onRecusar}
+                        disabled={loading}
+                        className="flex-1 rounded-lg bg-gray-200 px-4 py-2 font-bold text-gray-700 hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        Não
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- QUADRA MARKER ---
 const QuadraMarker = ({ quadra, isFeita, podeEditar, nota, onAbrirNota, onAlternarQuadra }) => {
     const alternarQuadra = async () => {
@@ -377,7 +754,9 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const [msgPronta, setMsgPronta] = useState(null);
     const [posicaoClique, setPosicaoClique] = useState(null);
     const [modalConfig, setModalConfig] = useState({ open: false, dados: null });
+    const [confirmacaoFinalizacaoAberta, setConfirmacaoFinalizacaoAberta] = useState(false);
     const [loadingAction, setLoadingAction] = useState(false);
+    const { notify, confirm } = useUiFeedback();
 
     const pontosFiltrados = useMemo(() => {
         const todos = dados.properties.pontos || [];
@@ -449,35 +828,50 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const finalizarTerritorio = async () => {
         if (!dadosBanco.designadoPara) return;
         try {
-            const ciclo = dadosBanco.cicloAtual || { dataInicio: dadosBanco.dataDesignacao || new Date(), responsaveis: [dadosBanco.designadoNome] };
-            const historico = { ...ciclo, dataTermino: new Date(), responsaveis: [...new Set([...(ciclo.responsaveis || []), dadosBanco.designadoNome])] };
-
-            await salvarEstadoTerritorio({
-                designadoPara: null,
-                designadoNome: null,
-                dataDesignacao: null,
-                cicloAtual: null,
-                historico: arrayUnion(historico),
-                ultimaConclusao: new Date(),
-                quadras_feitas: [],
-                status: TERRITORIO_STATUS.FINALIZADO,
-                ultimaAlteracao: new Date()
+            setLoadingAction(true);
+            const resultado = await finalizarTerritorioDesignado({
+                salvarEstadoTerritorio,
+                dadosBanco,
+                nome,
+                db,
+                contextoSistema
             });
 
-            const q = query(collection(db, "usuarios"), where("role", "==", "admin"));
-            const querySnapshot = await getDocs(q);
-            if (!querySnapshot.empty) {
-                await addDoc(collection(db, "notificacoes"), {
-                    para: "ADMINS",
-                    texto: `🏁 O Território ${nome} foi finalizado por ${dadosBanco.designadoNome}${contextoSufixo}.`,
-                    data: new Date(),
-                    lida: false,
-                    tipo: 'conclusao',
-                    origem: 'sistema'
+            if (resultado.ok) {
+                notify({
+                    title: 'Territorio finalizado',
+                    message: `Parabéns! Você finalizou o território${resultado.contextoSufixo}. Solicite um novo ao Servo de Territórios com antecedência. Os administradores foram notificados.`,
+                    variant: 'success',
+                    durationMs: 7000
                 });
             }
-            alert(`Parabéns! Você finalizou o território${contextoSufixo}. Solicite um novo ao Servo de Territórios com antecedência. Os administradores foram notificados.`);
         } catch (error) { console.error(error); }
+        finally {
+            setLoadingAction(false);
+        }
+    };
+
+    const confirmarFinalizacao = async () => {
+        setConfirmacaoFinalizacaoAberta(false);
+        await finalizarTerritorio();
+    };
+
+    const recusarFinalizacao = async () => {
+        try {
+            setLoadingAction(true);
+            await salvarEstadoTerritorio({
+                status: TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO,
+                ultimaAlteracao: new Date()
+            });
+            setConfirmacaoFinalizacaoAberta(false);
+            notify({
+                title: 'Territorio aguardando voce',
+                message: 'Tudo certo. O território continua com você e ficará como 100% concluído, aguardando sua confirmação final.',
+                variant: 'info'
+            });
+        } finally {
+            setLoadingAction(false);
+        }
     };
 
     const alternarQuadra = async (quadraId, jaFeita) => {
@@ -504,18 +898,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         });
 
         if (feitas + 1 === total) {
-            const confirmouFinalizacao = confirm(`Você finalizou o território${contextoSufixo}?`);
-
-            if (confirmouFinalizacao) {
-                await finalizarTerritorio();
-                return;
-            }
-
-            await salvarEstadoTerritorio({
-                status: TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO,
-                ultimaAlteracao: new Date()
-            });
-            alert("Tudo certo. O território continua com você e ficará como 100% concluído, aguardando sua confirmação final.");
+            setConfirmacaoFinalizacaoAberta(true);
         }
     };
 
@@ -550,7 +933,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     };
 
     const removerNota = async (quadraId, noteId) => {
-        if (!confirm("Excluir esta mensagem?")) return;
+        if (!(await confirm({
+            title: 'Excluir mensagem',
+            message: 'Excluir esta mensagem?',
+            tone: 'danger',
+            confirmLabel: 'Excluir'
+        }))) return;
         const notasAtuais = dadosBase.notas_quadras?.[quadraId];
 
         const updates = { ultimaAlteracao: new Date() };
@@ -661,7 +1049,12 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
         try {
             if (!usuarioSelecionado) {
-                if (!dadosBanco.designadoPara || !confirm("Confirmar devolução do território?")) {
+                if (!dadosBanco.designadoPara || !(await confirm({
+                    title: 'Devolver territorio',
+                    message: 'Confirmar devolução do território?',
+                    tone: 'warning',
+                    confirmLabel: 'Devolver'
+                }))) {
                     setLoadingAction(false);
                     return;
                 }
@@ -683,13 +1076,28 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
                 await salvarEstadoTerritorio(updateData);
                 try {
-                    await addDoc(collection(db, "notificacoes"), { para: "ADMINS", texto: `Território ${nome} devolvido${contextoSufixo}.`, data: new Date(), lida: false, tipo: 'devolucao' });
+                    const texto = `Território ${nome} devolvido${contextoSufixo}.`;
+                    if (relayDisponivel()) {
+                        await enviarEventoNotificacaoPeloRelay({
+                            para: 'ADMINS',
+                            texto,
+                            tipo: 'devolucao',
+                            origem: 'sistema',
+                            tituloPush: 'Território devolvido'
+                        });
+                    } else {
+                        await addDoc(collection(db, "notificacoes"), { para: "ADMINS", texto, data: new Date(), lida: false, tipo: 'devolucao' });
+                    }
                 } catch (error) {
                     console.error("Erro ao enviar notificação de devolução:", error);
                 }
 
                 setMsgPronta(null);
-                alert("✅ Território devolvido com sucesso! Sincronizado com o servidor.");
+                notify({
+                    title: 'Territorio devolvido',
+                    message: 'Território devolvido com sucesso. Sincronizado com o servidor.',
+                    variant: 'success'
+                });
             } else {
                 const usuarioObj = listaUsuarios.find(u => u.email === usuarioSelecionado);
                 const novoNome = usuarioObj ? usuarioObj.nome : "Dirigente";
@@ -708,18 +1116,32 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 const contextoLinha = contextoSistema?.campanhaAtiva ? `\n *Modo:* ${contextoSistema.contextoAtivoTitulo}` : '';
                 setMsgPronta({ texto: `Olá *${novoNome}*! \nO território *${nome}* foi designado para você.${contextoLinha}\n\n *Acesse:* ${link}\n\nBom trabalho!`, whatsapp: usuarioObj?.whatsapp, nome: novoNome });
 
-                alert(`✅ Designação salva com sucesso para ${novoNome}!`);
+                notify({
+                    title: 'Designacao salva',
+                    message: `Designação salva com sucesso para ${novoNome}.`,
+                    variant: 'success'
+                });
             }
         } catch (error) {
             console.error("Erro ao salvar:", error);
-            alert("❌ ERRO AO SALVAR: Verifique sua conexão com a internet e tente novamente. A alteração NÃO foi salva.");
+            notify({
+                title: 'Erro ao salvar',
+                message: 'Verifique sua conexão com a internet e tente novamente. A alteração não foi salva.',
+                variant: 'error',
+                durationMs: 7000
+            });
         } finally {
             setLoadingAction(false);
         }
     };
 
     const disponibilizarNovamente = async () => {
-        if (!confirm("Remover o status de finalizado e deixar este território disponível novamente?")) return;
+        if (!(await confirm({
+            title: 'Disponibilizar novamente',
+            message: 'Remover o status de finalizado e deixar este território disponível novamente?',
+            tone: 'warning',
+            confirmLabel: 'Disponibilizar'
+        }))) return;
 
         setLoadingAction(true);
         try {
@@ -727,10 +1149,18 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 status: TERRITORIO_STATUS.ABERTO,
                 ultimaAlteracao: new Date()
             });
-            alert("✅ Território liberado novamente para trabalho.");
+            notify({
+                title: 'Territorio liberado',
+                message: 'Território liberado novamente para trabalho.',
+                variant: 'success'
+            });
         } catch (error) {
             console.error("Erro ao reabrir território:", error);
-            alert("❌ Não foi possível liberar o território novamente.");
+            notify({
+                title: 'Reabertura indisponivel',
+                message: 'Não foi possível liberar o território novamente.',
+                variant: 'error'
+            });
         } finally {
             setLoadingAction(false);
         }
@@ -788,6 +1218,15 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                                     ? 'Território finalizado e aguardando nova liberação.'
                                     : 'Território 100% concluído, aguardando confirmação final.'}
                             </div>
+                        )}
+                        {isMeu && isAguardandoFinalizacao && (
+                            <button
+                                onClick={finalizarTerritorio}
+                                disabled={loadingAction}
+                                className={`popup-btn-action mb-3 text-white ${loadingAction ? 'bg-emerald-400 cursor-wait' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                            >
+                                {loadingAction ? 'Finalizando...' : 'Confirmar Finalização'}
+                            </button>
                         )}
                         {isAdmin ? (
                             <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
@@ -923,6 +1362,13 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 </Marker>
             ))}
             <ModalNota key={`${modalConfig.open ? 'open' : 'closed'}-${modalConfig.dados?.quadraId || 'sem-quadra'}`} isOpen={modalConfig.open} dados={modalConfig.dados} user={user} isAdmin={isAdmin} onClose={fecharModal} onAdicionar={adicionarNota} onEditar={editarNota} onExcluir={removerNota} />
+            <ModalConfirmacaoFinalizacao
+                isOpen={confirmacaoFinalizacaoAberta}
+                onConfirmar={confirmarFinalizacao}
+                onRecusar={recusarFinalizacao}
+                loading={loadingAction}
+                contextoSufixo={contextoSufixo}
+            />
         </>
     );
 };
@@ -933,6 +1379,9 @@ const Mapa = ({ user, isAdmin, contextoSistema }) => {
     const [zoomLevel, setZoomLevel] = useState(14);
     const [listaUsuarios, setListaUsuarios] = useState([]);
     const [posicaoUsuario, setPosicaoUsuario] = useState(null);
+    const [trilhaUsuario, setTrilhaUsuario] = useState([]);
+    const [direcaoUsuario, setDirecaoUsuario] = useState(null);
+    const [rastreandoLocalizacao, setRastreandoLocalizacao] = useState(false);
     const [tipoMapa, setTipoMapa] = useState('google');
     const [ocultarCores, setOcultarCores] = useState(false);
     const [showRefs, setShowRefs] = useState(true);
@@ -975,8 +1424,17 @@ const Mapa = ({ user, isAdmin, contextoSistema }) => {
 
                     <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} showRefs={showRefs} setShowRefs={setShowRefs} showCondos={showCondos} setShowCondos={setShowCondos} />
                     <ControleVisibilidade ocultarCores={ocultarCores} setOcultarCores={setOcultarCores} />
-                    <ControlesNavegacao setPosicaoUsuario={setPosicaoUsuario} />
-                    <MarcadorUsuario posicao={posicaoUsuario} />
+                    <ControlesNavegacao
+                        rastreandoLocalizacao={rastreandoLocalizacao}
+                        setRastreandoLocalizacao={setRastreandoLocalizacao}
+                        setPosicaoUsuario={setPosicaoUsuario}
+                        setTrilhaUsuario={setTrilhaUsuario}
+                        setDirecaoUsuario={setDirecaoUsuario}
+                    />
+                    {trilhaUsuario.length > 1 && (
+                        <Polyline positions={trilhaUsuario} pathOptions={{ color: '#94a3b8', weight: 4, opacity: 0.38, lineCap: 'round', lineJoin: 'round' }} />
+                    )}
+                    <MarcadorUsuario posicao={posicaoUsuario} direcao={direcaoUsuario} />
 
                     {geoJsonData.features.map((feature, index) => {
                         const uniqueId = getFeatureId(feature, index);
@@ -1004,3 +1462,4 @@ const Mapa = ({ user, isAdmin, contextoSistema }) => {
 };
 
 export default Mapa;
+

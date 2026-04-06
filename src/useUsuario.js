@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, addDoc, collection } from 'firebase/firestore';
 import { db } from './firebase';
+import { enviarEventoNotificacaoPeloRelay, relayDisponivel } from './notificationRelay';
 
 const ESTADO_BASE = {
     email: null,
@@ -43,13 +44,24 @@ export function useUsuario(user) {
                         criadoEm: new Date()
                     });
 
-                    await addDoc(collection(db, "notificacoes"), {
-                        texto: `Novo cadastro pendente: ${user.displayName || user.email}`,
-                        para: 'ADMINS',
-                        origem: 'sistema',
-                        lida: false,
-                        data: new Date()
-                    });
+                    const texto = `Novo cadastro pendente: ${user.displayName || user.email}`;
+                    if (relayDisponivel()) {
+                        await enviarEventoNotificacaoPeloRelay({
+                            para: 'ADMINS',
+                            texto,
+                            tipo: 'cadastro',
+                            origem: 'sistema',
+                            tituloPush: 'Novo cadastro pendente'
+                        });
+                    } else {
+                        await addDoc(collection(db, "notificacoes"), {
+                            texto,
+                            para: 'ADMINS',
+                            origem: 'sistema',
+                            lida: false,
+                            data: new Date()
+                        });
+                    }
 
                 } catch (err) {
                     console.error("Erro ao criar solicitação:", err);
