@@ -26,4 +26,5 @@ android/local.properties
 android/key.properties
 android/app/*.jks
 android/app/*.keystore
+android/app/google-services.json
 territorios-palmas-debug.apk

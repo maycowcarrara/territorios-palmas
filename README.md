@@ -118,6 +118,12 @@ npm install
 
 Crie o arquivo `src/firebase.js` com a inicialização do projeto e exporte `db`, `auth` e `googleProvider`.
 
+### Configurar Firebase no Android
+
+Baixe o arquivo `google-services.json` do projeto Firebase Android com o pacote `br.com.territoriospalmas.app` e salve-o em `android/app/google-services.json`.
+
+Esse arquivo fica apenas no ambiente local e não deve ser versionado no Git.
+
 ## Scripts
 
 ```bash
