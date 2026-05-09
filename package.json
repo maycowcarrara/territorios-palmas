@@ -1,7 +1,7 @@
 {
   "name": "territorios-palmas",
   "private": true,
-  "version": "2.0.180",
+  "version": "2.2.194",
   "homepage": "https://maycowcarrara.github.io/territorios-palmas",
   "type": "module",
   "scripts": {
@@ -31,6 +31,8 @@
     "worker:dev": "npm --prefix workers/notifications-relay run dev",
     "worker:deploy": "npm --prefix workers/notifications-relay run deploy",
     "worker:tail": "npm --prefix workers/notifications-relay run tail",
+    "firestore:export": "node scripts/firestore-migrate.cjs export",
+    "firestore:import": "node scripts/firestore-migrate.cjs import",
     "git-push": "git add . && git commit -m \"Update\" && git push",
     "deploy": "npm run build && firebase deploy",
     "web:deploy": "npm run deploy"
@@ -44,9 +46,11 @@
     "@capacitor/push-notifications": "^7.0.6",
     "@capgo/capacitor-social-login": "^7.11.2",
     "firebase": "^12.8.0",
+    "firebase-admin": "^13.9.0",
     "jspdf": "^4.0.0",
     "jspdf-autotable": "^5.0.7",
     "leaflet": "^1.9.4",
+    "onesignal-cordova-plugin": "^5.3.8",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-leaflet": "^5.0.0",

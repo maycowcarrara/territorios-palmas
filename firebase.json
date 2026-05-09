@@ -3,6 +3,7 @@
     "rules": "firestore.rules"
   },
   "hosting": {
+    "site": "territorios-15891-palmas-pr",
     "public": "dist",
     "ignore": [
       "firebase.json",

@@ -175,7 +175,13 @@ function Login() {
 }
 
 // --- SININHO DE NOTIFICAÇÕES ---
-const SininhoNotificacoes = ({ user, isAdmin }) => {
+const SininhoNotificacoes = ({
+  user,
+  isAdmin,
+  pushStatus = 'oculto',
+  ativandoPush = false,
+  onAtivarPush
+}) => {
   const [notificacoes, setNotificacoes] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -235,6 +241,25 @@ const SininhoNotificacoes = ({ user, isAdmin }) => {
               <h3 className="font-bold text-blue-800 text-sm flex items-center gap-2">🔔 Notificações</h3>
               <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold px-2">✕</button>
             </div>
+            {pushStatus !== 'oculto' && (
+              <div className="border-b border-blue-100 bg-white p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className={`text-xs font-bold ${pushStatus === 'ativo' ? 'text-emerald-700' : pushStatus === 'bloqueado' ? 'text-red-600' : 'text-gray-600'}`}>
+                    {pushStatus === 'ativo' ? 'Push ativo' : pushStatus === 'bloqueado' ? 'Push bloqueado' : 'Push desativado'}
+                  </span>
+                  {pushStatus !== 'ativo' && pushStatus !== 'bloqueado' && (
+                    <button
+                      type="button"
+                      onClick={onAtivarPush}
+                      disabled={ativandoPush}
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-70"
+                    >
+                      {ativandoPush ? 'Ativando...' : 'Ativar'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="max-h-96 overflow-y-auto bg-gray-50/50">
               {notificacoes.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 text-sm flex flex-col items-center">
@@ -912,6 +937,9 @@ function Dashboard() {
   const [sobreAberto, setSobreAberto] = useState(false);
   const [meusTerritoriosAberto, setMeusTerritoriosAberto] = useState(false);
   const [confirmarLogoutAberto, setConfirmarLogoutAberto] = useState(false);
+  const [pushStatus, setPushStatus] = useState('oculto');
+  const [ativandoPush, setAtivandoPush] = useState(false);
+  const { notify } = useUiFeedback();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -934,6 +962,56 @@ function Dashboard() {
       console.warn('Push notifications nao puderam ser ativadas:', error);
     });
   }, [autorizado, user]);
+
+  useEffect(() => {
+    if (!user || !autorizado || Capacitor.isNativePlatform() || typeof window === 'undefined') {
+      setPushStatus('oculto');
+      return;
+    }
+
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !window.isSecureContext) {
+      setPushStatus('bloqueado');
+      return;
+    }
+
+    if (Notification.permission === 'granted') {
+      setPushStatus('ativo');
+      return;
+    }
+
+    if (Notification.permission === 'denied') {
+      setPushStatus('bloqueado');
+      return;
+    }
+
+    setPushStatus('desativado');
+  }, [autorizado, user]);
+
+  const handleAtivarPush = async () => {
+    if (!user || ativandoPush) return;
+
+    setAtivandoPush(true);
+
+    try {
+      await ativarPushNotifications(user);
+      setPushStatus(typeof Notification !== 'undefined' && Notification.permission === 'denied' ? 'bloqueado' : 'ativo');
+      notify({
+        title: 'Push ativado',
+        message: 'Este dispositivo receberá notificações.',
+        variant: 'success'
+      });
+    } catch (error) {
+      console.warn('Push notifications nao puderam ser ativadas:', error);
+      setPushStatus(typeof Notification !== 'undefined' && Notification.permission === 'denied' ? 'bloqueado' : 'desativado');
+      notify({
+        title: 'Push indisponivel',
+        message: String(error?.message || 'Não foi possível ativar notificações neste navegador.'),
+        variant: 'warning'
+      });
+    } finally {
+      setAtivandoPush(false);
+    }
+  };
 
   useEffect(() => {
     if (!user || !autorizado) return;
@@ -1155,7 +1233,13 @@ function Dashboard() {
             </button>
           )}
 
-          <SininhoNotificacoes user={user} isAdmin={isAdmin} />
+          <SininhoNotificacoes
+            user={user}
+            isAdmin={isAdmin}
+            pushStatus={pushStatus}
+            ativandoPush={ativandoPush}
+            onAtivarPush={handleAtivarPush}
+          />
 
           <button
             onClick={() => setMeusTerritoriosAberto(true)}

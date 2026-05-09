@@ -2,13 +2,28 @@ import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore"; // Apenas getFirestore
 
+const requiredFirebaseEnv = [
+    "VITE_FIREBASE_API_KEY",
+    "VITE_FIREBASE_AUTH_DOMAIN",
+    "VITE_FIREBASE_PROJECT_ID",
+    "VITE_FIREBASE_STORAGE_BUCKET",
+    "VITE_FIREBASE_MESSAGING_SENDER_ID",
+    "VITE_FIREBASE_APP_ID"
+];
+
+const missingFirebaseEnv = requiredFirebaseEnv.filter((key) => !import.meta.env[key]);
+
+if (missingFirebaseEnv.length > 0) {
+    throw new Error(`Configuração Firebase ausente: ${missingFirebaseEnv.join(", ")}`);
+}
+
 const firebaseConfig = {
-    apiKey: "AIzaSyBmR4PilWSpPeP_TNWi7LCn9iGso3xnWI8",
-    authDomain: "territorios-palmas.firebaseapp.com",
-    projectId: "territorios-palmas",
-    storageBucket: "territorios-palmas.firebasestorage.app",
-    messagingSenderId: "248096290085",
-    appId: "1:248096290085:web:ea8d224c2bb99b140456cc"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);

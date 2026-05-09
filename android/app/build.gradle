@@ -11,8 +11,14 @@ if (hasReleaseKeystore) {
 android {
     namespace "br.com.territoriospalmas.app"
     compileSdk rootProject.ext.compileSdkVersion
-    if (hasReleaseKeystore) {
-        signingConfigs {
+    signingConfigs {
+        debugTerritorios {
+            keyAlias 'territoriosdebug'
+            keyPassword 'territoriosdebug'
+            storeFile file('debug-territorios.keystore')
+            storePassword 'territoriosdebug'
+        }
+        if (hasReleaseKeystore) {
             release {
                 keyAlias keystoreProperties['keyAlias']
                 keyPassword keystoreProperties['keyPassword']
@@ -35,6 +41,9 @@ android {
         }
     }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debugTerritorios
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

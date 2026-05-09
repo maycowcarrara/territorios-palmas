@@ -151,6 +151,10 @@ firebase deploy --only firestore:rules
 
 Se o deploy das rules falhar com permissão `serviceusage.services.use`, ajuste o IAM da conta usada no Firebase CLI no projeto Google Cloud.
 
+## Migração para Outro Firebase
+
+Para copiar o Firestore atual para um projeto Firebase em outra conta Google, use o script documentado em [scripts/firestore-migrate.md](./scripts/firestore-migrate.md).
+
 ## Teste em Celular
 
 ### Opção recomendada

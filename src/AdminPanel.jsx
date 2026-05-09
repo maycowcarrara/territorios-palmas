@@ -311,8 +311,10 @@ const AdminPanel = () => {
         setEnviandoComunicado(true);
 
         try {
+            let resultadoRelay = null;
+
             if (relayDisponivel()) {
-                await enviarComunicadoPeloRelay({
+                resultadoRelay = await enviarComunicadoPeloRelay({
                     destino: destinoComunicado,
                     mensagem
                 });
@@ -356,8 +358,8 @@ const AdminPanel = () => {
             setComunicadoGeral('');
             notify({
                 title: 'Comunicado enviado',
-                message: relayDisponivel()
-                    ? `Comunicado enviado para ${totalDestino} ${rotuloDestino}, com push para quem tiver FCM ativo.`
+                message: resultadoRelay
+                    ? `Comunicado enviado para ${resultadoRelay.destinatarios ?? totalDestino} ${rotuloDestino}. Push ${resultadoRelay.canal ?? 'relay'}: ${resultadoRelay.pushesEnviados ?? 0} enviado(s), ${resultadoRelay.pushesFalharam ?? 0} falha(s).`
                     : `Comunicado enviado para ${totalDestino} ${rotuloDestino}.`,
                 variant: 'success'
             });

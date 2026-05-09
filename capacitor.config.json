@@ -3,6 +3,13 @@
   "appName": "Territórios Palmas",
   "webDir": "dist",
   "bundledWebRuntime": false,
+  "server": {
+    "hostname": "territorios-palmas.local",
+    "androidScheme": "https"
+  },
+  "android": {
+    "resolveServiceWorkerRequests": false
+  },
   "plugins": {
     "PushNotifications": {
       "presentationOptions": [

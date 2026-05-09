@@ -3,5 +3,6 @@ main = "src/index.js"
 compatibility_date = "2026-04-04"
 
 [vars]
-FIREBASE_PROJECT_ID = "territorios-palmas"
-FIREBASE_WEB_API_KEY = "AIzaSyBmR4PilWSpPeP_TNWi7LCn9iGso3xnWI8"
+FIREBASE_PROJECT_ID = "territ-cong-15891-palmas-pr"
+FIREBASE_WEB_API_KEY = "AIzaSyDpqEm1R2P6DOmdJfnEN2-OSRnJJPACCFo"
+PUBLIC_APP_URL = "https://territorios-15891-palmas-pr.web.app"

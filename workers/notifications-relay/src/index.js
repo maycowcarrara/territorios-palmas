@@ -1,4 +1,5 @@
 const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const ONESIGNAL_NOTIFICATIONS_URL = 'https://api.onesignal.com/notifications';
 
 let cachedAccessToken = null;
 let cachedAccessTokenExpiry = 0;
@@ -190,6 +191,8 @@ const firestoreDocumentName = (env, path) =>
 const firestoreCommitUrl = (env) =>
     `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents:commit`;
 
+const getPublicAppUrl = (env) => String(env.PUBLIC_APP_URL || 'https://territorios-15891-palmas-pr.web.app').replace(/\/$/, '');
+
 const getFirestoreDocument = async (env, accessToken, path) => {
     const response = await fetch(firestoreDocumentUrl(env, path), {
         headers: {
@@ -311,6 +314,65 @@ const enviarMensagemFcm = async (env, accessToken, { token, titulo, mensagem, ti
     return { ok: false, error: data };
 };
 
+const oneSignalDisponivel = (env) => Boolean(env.ONESIGNAL_APP_ID && env.ONESIGNAL_REST_API_KEY);
+
+const enviarMensagemOneSignal = async (env, { externalIds, titulo, mensagem, tipo = 'sistema', targetRoute = '/app' }) => {
+    const aliases = [...new Set(externalIds.filter(Boolean))];
+    if (!aliases.length) {
+        return { ok: true, enviados: 0 };
+    }
+
+    const response = await fetch(ONESIGNAL_NOTIFICATIONS_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Key ${env.ONESIGNAL_REST_API_KEY}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            app_id: env.ONESIGNAL_APP_ID,
+            target_channel: 'push',
+            include_aliases: {
+                external_id: aliases
+            },
+            headings: {
+                en: titulo,
+                pt: titulo
+            },
+            contents: {
+                en: mensagem,
+                pt: mensagem
+            },
+            data: {
+                tipo,
+                targetRoute
+            },
+            web_url: `${getPublicAppUrl(env)}/#${targetRoute.startsWith('/') ? targetRoute : `/${targetRoute}`}`
+        })
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        console.error('Falha ao enviar push OneSignal:', {
+            status: response.status,
+            externalIds: aliases.length,
+            error: data
+        });
+        return { ok: false, error: data };
+    }
+
+    console.log('Push OneSignal enviado:', {
+        id: data.id || null,
+        recipients: data.recipients ?? null,
+        externalIds: aliases.length
+    });
+
+    return {
+        ok: true,
+        enviados: Number(data.recipients || aliases.length),
+        id: data.id || null
+    };
+};
+
 const getDestinatariosBroadcast = (usuarios, destino) => {
     if (destino === 'admins') {
         return usuarios.filter((user) => user.role === 'admin');
@@ -336,6 +398,10 @@ const getTokensDestinatarios = (destinatarios) => [...new Set(
         const lista = Array.isArray(user.fcmTokens) ? user.fcmTokens : [];
         return lista.length ? lista : (user.ultimoFcmToken ? [user.ultimoFcmToken] : []);
     }).filter(Boolean)
+)];
+
+const getExternalIdsDestinatarios = (destinatarios) => [...new Set(
+    destinatarios.map((user) => user.id).filter(Boolean)
 )];
 
 const buildNotificacoesBroadcast = (destino, mensagem, agora, destinatarios) => {
@@ -417,7 +483,25 @@ const getPushConfigNotificacao = ({ para, tipo, tituloPush }) => {
     };
 };
 
-const enviarPushes = async (env, accessToken, { titulo, mensagem, tipo, tokens, targetRoute }) => {
+const enviarPushes = async (env, accessToken, { titulo, mensagem, tipo, tokens, externalIds, targetRoute }) => {
+    if (oneSignalDisponivel(env)) {
+        const resultado = await enviarMensagemOneSignal(env, {
+            externalIds,
+            titulo,
+            mensagem,
+            tipo,
+            targetRoute
+        });
+
+        return {
+            canal: 'onesignal',
+            pushesEnviados: resultado.ok ? resultado.enviados : 0,
+            pushesFalharam: resultado.ok ? 0 : externalIds.length,
+            erroPush: resultado.ok ? null : resultado.error,
+            mensagemId: resultado.id || null
+        };
+    }
+
     const resultados = await Promise.all(tokens.map((token) => enviarMensagemFcm(env, accessToken, {
         token,
         titulo,
@@ -427,8 +511,11 @@ const enviarPushes = async (env, accessToken, { titulo, mensagem, tipo, tokens, 
     })));
 
     return {
+        canal: 'fcm',
         pushesEnviados: resultados.filter((item) => item.ok).length,
-        pushesFalharam: resultados.filter((item) => !item.ok).length
+        pushesFalharam: resultados.filter((item) => !item.ok).length,
+        erroPush: null,
+        mensagemId: null
     };
 };
 
@@ -482,16 +569,18 @@ export default {
 
                 const destinatarios = getDestinatariosBroadcast(usuarios, destino);
                 const tokens = getTokensDestinatarios(destinatarios);
+                const externalIds = getExternalIdsDestinatarios(destinatarios);
                 const agora = new Date();
                 const notificacoesInternas = buildNotificacoesBroadcast(destino, mensagem, agora, destinatarios);
                 await escreverNotificacoes(env, accessToken, notificacoesInternas);
 
                 const pushConfig = getPushConfigBroadcast(destino);
-                const { pushesEnviados, pushesFalharam } = await enviarPushes(env, accessToken, {
+                const { canal, pushesEnviados, pushesFalharam, mensagemId } = await enviarPushes(env, accessToken, {
                     titulo: pushConfig.titulo,
                     mensagem,
                     tipo: pushConfig.tipo,
                     tokens,
+                    externalIds,
                     targetRoute: pushConfig.targetRoute
                 });
 
@@ -501,8 +590,11 @@ export default {
                     destino,
                     destinatarios: destinatarios.length,
                     tokens: tokens.length,
+                    externalIds: externalIds.length,
+                    canal,
                     pushesEnviados,
-                    pushesFalharam
+                    pushesFalharam,
+                    mensagemId
                 }, 200, headers);
             }
 
@@ -524,6 +616,7 @@ export default {
 
                 const destinatarios = getDestinatariosNotificacao({ usuarios, para });
                 const tokens = getTokensDestinatarios(destinatarios);
+                const externalIds = getExternalIdsDestinatarios(destinatarios);
                 const agora = new Date();
                 const notificacoesInternas = buildNotificacaoAvulsa({
                     para,
@@ -534,11 +627,12 @@ export default {
                 await escreverNotificacoes(env, accessToken, notificacoesInternas);
 
                 const pushConfig = getPushConfigNotificacao({ para, tipo, tituloPush });
-                const { pushesEnviados, pushesFalharam } = await enviarPushes(env, accessToken, {
+                const { canal, pushesEnviados, pushesFalharam, mensagemId } = await enviarPushes(env, accessToken, {
                     titulo: pushConfig.titulo,
                     mensagem: texto,
                     tipo: pushConfig.tipo,
                     tokens,
+                    externalIds,
                     targetRoute: pushConfig.targetRoute
                 });
 
@@ -548,8 +642,11 @@ export default {
                     para,
                     destinatarios: destinatarios.length,
                     tokens: tokens.length,
+                    externalIds: externalIds.length,
+                    canal,
                     pushesEnviados,
-                    pushesFalharam
+                    pushesFalharam,
+                    mensagemId
                 }, 200, headers);
             }
 
