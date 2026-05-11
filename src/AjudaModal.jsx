@@ -56,7 +56,7 @@ const AjudaModal = ({ isOpen, onClose }) => {
                                 <span className="text-2xl mb-1 block">📱</span>
                                 <strong className="block text-xs text-gray-500 uppercase tracking-wide">Celular</strong>
                                 <p className="text-sm font-bold text-blue-600">Segurar o Dedo</p>
-                                <p className="text-xs text-gray-400">Toque longo (1s)</p>
+                                <p className="text-xs text-gray-400">Toque longo</p>
                             </div>
                         </div>
                         <p className="text-xs text-gray-500 italic text-center mt-2">
@@ -99,7 +99,7 @@ const AjudaModal = ({ isOpen, onClose }) => {
                                 </div>
                                 <div>
                                     <strong className="text-sm text-gray-800 block">Ponto de Encontro</strong>
-                                    <p className="text-xs text-gray-600">Toque em <strong>qualquer lugar</strong> dentro do seu território (no mapa) para abrir a opção de compartilhar aquele local exato no WhatsApp.</p>
+                                    <p className="text-xs text-gray-600">Toque no local desejado dentro do seu território, abra o popup do território e use <strong>Ponto de Encontro</strong> para compartilhar aquele ponto no WhatsApp.</p>
                                 </div>
                             </li>
                         </ul>

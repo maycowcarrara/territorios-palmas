@@ -602,7 +602,7 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
       if (resultado.ok) {
         setLista((listaAtual) => listaAtual.filter((territorio) => territorio.id !== item.id));
         notify({
-          title: 'Territorio finalizado',
+          title: 'Território finalizado',
           message: `Território finalizado com sucesso${resultado.contextoSufixo}.`,
           variant: 'success'
         });
@@ -610,7 +610,7 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
     } catch (error) {
       console.error(error);
       notify({
-        title: 'Finalizacao indisponivel',
+        title: 'Finalização indisponível',
         message: 'Não foi possível finalizar o território agora. Tente novamente.',
         variant: 'error'
       });
@@ -1004,7 +1004,7 @@ function Dashboard() {
       console.warn('Push notifications nao puderam ser ativadas:', error);
       setPushStatus(typeof Notification !== 'undefined' && Notification.permission === 'denied' ? 'bloqueado' : 'desativado');
       notify({
-        title: 'Push indisponivel',
+        title: 'Push indisponível',
         message: String(error?.message || 'Não foi possível ativar notificações neste navegador.'),
         variant: 'warning'
       });

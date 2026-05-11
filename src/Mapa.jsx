@@ -272,7 +272,7 @@ const ControlesNavegacao = ({
 
         if (!Capacitor.isNativePlatform() && !navigator.geolocation) {
             notify({
-                title: 'Localizacao indisponivel',
+                title: 'Localização indisponível',
                 message: 'Seu navegador não suporta localização.',
                 variant: 'warning'
             });
@@ -354,7 +354,7 @@ const ControlesNavegacao = ({
                 pararWatch();
                 setRastreandoLocalizacao(false);
                 notify({
-                    title: 'Permissao de localizacao',
+                    title: 'Permissão de localização',
                     message: 'Permita o acesso à localização do app para usar o GPS do celular.',
                     variant: 'warning'
                 });
@@ -365,7 +365,7 @@ const ControlesNavegacao = ({
                 pararWatch();
                 setRastreandoLocalizacao(false);
                 notify({
-                    title: 'GPS necessario',
+                    title: 'GPS necessário',
                     message: 'Ative o GPS do celular para usar a sua localização no mapa.',
                     variant: 'warning'
                 });
@@ -733,7 +733,21 @@ const ModalConfirmacaoFinalizacao = ({ isOpen, onConfirmar, onRecusar, loading, 
 
 // --- QUADRA MARKER ---
 const QuadraMarker = ({ quadra, isFeita, podeEditar, nota, onAbrirNota, onAlternarQuadra }) => {
+    const toqueLongoRef = useRef(null);
+    const ignorarProximoClickRef = useRef(false);
+
+    const limparToqueLongo = () => {
+        if (toqueLongoRef.current) {
+            window.clearTimeout(toqueLongoRef.current);
+            toqueLongoRef.current = null;
+        }
+    };
+
     const alternarQuadra = async () => {
+        if (ignorarProximoClickRef.current) {
+            ignorarProximoClickRef.current = false;
+            return;
+        }
         if (!podeEditar) return;
         await onAlternarQuadra(quadra.id, isFeita);
     };
@@ -742,6 +756,22 @@ const QuadraMarker = ({ quadra, isFeita, podeEditar, nota, onAbrirNota, onAltern
         if (e.originalEvent) { e.originalEvent.preventDefault(); e.originalEvent.stopPropagation(); }
         if (podeEditar) { onAbrirNota(quadra.id, nota); }
     };
+
+    const iniciarToqueLongo = () => {
+        if (!podeEditar) return;
+        limparToqueLongo();
+        toqueLongoRef.current = window.setTimeout(() => {
+            toqueLongoRef.current = null;
+            ignorarProximoClickRef.current = true;
+            onAbrirNota(quadra.id, nota);
+        }, 650);
+    };
+
+    useEffect(() => () => {
+        if (toqueLongoRef.current) {
+            window.clearTimeout(toqueLongoRef.current);
+        }
+    }, []);
 
     const temNota = () => {
         if (!nota) return false;
@@ -759,7 +789,13 @@ const QuadraMarker = ({ quadra, isFeita, podeEditar, nota, onAbrirNota, onAltern
                 fillOpacity: 1, weight: 2
             }}
             radius={16}
-            eventHandlers={{ click: alternarQuadra, contextmenu: handleContextMenu }}
+            eventHandlers={{
+                click: alternarQuadra,
+                contextmenu: handleContextMenu,
+                touchstart: iniciarToqueLongo,
+                touchend: limparToqueLongo,
+                touchcancel: limparToqueLongo
+            }}
         >
             <Tooltip direction="center" permanent className="sem-fundo" opacity={1}>
                 <div className="relative flex items-center justify-center w-8 h-8 pointer-events-none">
@@ -872,7 +908,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
             if (resultado.ok) {
                 notify({
-                    title: 'Territorio finalizado',
+                    title: 'Território finalizado',
                     message: `Parabéns! Você finalizou o território${resultado.contextoSufixo}. Solicite um novo ao Servo de Territórios com antecedência. Os administradores foram notificados.`,
                     variant: 'success',
                     durationMs: 7000
@@ -898,7 +934,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             });
             setConfirmacaoFinalizacaoAberta(false);
             notify({
-                title: 'Territorio aguardando voce',
+                title: 'Território aguardando você',
                 message: 'Tudo certo. O território continua com você e ficará como 100% concluído, aguardando sua confirmação final.',
                 variant: 'info'
             });
@@ -1087,7 +1123,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         try {
             if (!usuarioSelecionado) {
                 if (!dadosBanco.designadoPara || !(await confirm({
-                    title: 'Devolver territorio',
+                    title: 'Devolver território',
                     message: 'Confirmar devolução do território?',
                     tone: 'warning',
                     confirmLabel: 'Devolver'
@@ -1131,7 +1167,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
                 setMsgPronta(null);
                 notify({
-                    title: 'Territorio devolvido',
+                    title: 'Território devolvido',
                     message: 'Território devolvido com sucesso. Sincronizado com o servidor.',
                     variant: 'success'
                 });
@@ -1154,7 +1190,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 setMsgPronta({ texto: `Olá *${novoNome}*! \nO território *${nome}* foi designado para você.${contextoLinha}\n\n *Acesse:* ${link}\n\nBom trabalho!`, whatsapp: usuarioObj?.whatsapp, nome: novoNome });
 
                 notify({
-                    title: 'Designacao salva',
+                    title: 'Designação salva',
                     message: `Designação salva com sucesso para ${novoNome}.`,
                     variant: 'success'
                 });
@@ -1187,14 +1223,14 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 ultimaAlteracao: new Date()
             });
             notify({
-                title: 'Territorio liberado',
+                title: 'Território liberado',
                 message: 'Território liberado novamente para trabalho.',
                 variant: 'success'
             });
         } catch (error) {
             console.error("Erro ao reabrir território:", error);
             notify({
-                title: 'Reabertura indisponivel',
+                title: 'Reabertura indisponível',
                 message: 'Não foi possível liberar o território novamente.',
                 variant: 'error'
             });

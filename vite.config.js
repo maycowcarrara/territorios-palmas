@@ -30,7 +30,6 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: null,
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
         name: 'Territórios Palmas',
         short_name: 'Territórios',
@@ -45,12 +44,10 @@ export default defineConfig({
         ]
       },
       workbox: {
-        // --- ADICIONE ESTAS DUAS LINHAS ---
         skipWaiting: true,
         clientsClaim: true,
-        // ----------------------------------
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        cleanupOutdatedCaches: true, // Garante que caches velhos de build sejam limpos automaticamente
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.includes('version.json'),

@@ -125,7 +125,7 @@ const AdminPanel = () => {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(novoEmail)) {
             notify({
-                title: 'E-mail invalido',
+                title: 'E-mail inválido',
                 message: 'Por favor, verifique o formato informado.',
                 variant: 'warning'
             });
@@ -144,7 +144,7 @@ const AdminPanel = () => {
         const whatsLimpo = novoWhats.replace(/\D/g, '');
         if (novoWhats && (whatsLimpo.length < 10 || whatsLimpo.length > 11)) {
             notify({
-                title: 'WhatsApp invalido',
+                title: 'WhatsApp inválido',
                 message: 'O número deve ter DDD + 8 ou 9 dígitos.',
                 variant: 'warning'
             });
@@ -165,7 +165,7 @@ const AdminPanel = () => {
             setNovoNome('');
             setNovoWhats('');
             notify({
-                title: 'Usuario cadastrado',
+                title: 'Usuário cadastrado',
                 message: 'Usuário adicionado com sucesso.',
                 variant: 'success'
             });
@@ -193,7 +193,7 @@ const AdminPanel = () => {
                 : `Deseja remover as permissões de administrador de ${nomeUsuario}?`;
 
         if (!(await confirm({
-            title: aprovandoUsuario ? 'Aprovar usuario' : promovendoAdmin ? 'Promover para admin' : 'Remover permissao de admin',
+            title: aprovandoUsuario ? 'Aprovar usuário' : promovendoAdmin ? 'Promover para admin' : 'Remover permissão de admin',
             message: alerta,
             tone: promovendoAdmin || rebaixandoAdmin ? 'warning' : 'info',
             confirmLabel: aprovandoUsuario ? 'Aprovar' : promovendoAdmin ? 'Promover' : 'Remover'
@@ -205,7 +205,7 @@ const AdminPanel = () => {
             await updateDoc(doc(db, "usuarios", user.id), { role: novaRole });
         } catch {
             notify({
-                title: 'Permissao nao alterada',
+                title: 'Permissão não alterada',
                 message: 'Não foi possível mudar a permissão agora.',
                 variant: 'error'
             });
@@ -214,7 +214,7 @@ const AdminPanel = () => {
 
     const remover = async (email) => {
         if (!(await confirm({
-            title: 'Excluir usuario',
+            title: 'Excluir usuário',
             message: `Tem certeza que deseja excluir definitivamente o usuário ${email}?\n\nEssa ação não pode ser desfeita.`,
             tone: 'danger',
             confirmLabel: 'Excluir'
@@ -226,7 +226,7 @@ const AdminPanel = () => {
             await deleteDoc(doc(db, "usuarios", email));
         } catch {
             notify({
-                title: 'Usuario nao removido',
+                title: 'Usuário não removido',
                 message: 'Não foi possível remover esse usuário agora.',
                 variant: 'error'
             });
@@ -256,7 +256,7 @@ const AdminPanel = () => {
         } catch (error) {
             console.error(error);
             notify({
-                title: 'Edicao nao salva',
+                title: 'Edição não salva',
                 message: 'Não foi possível salvar as alterações.',
                 variant: 'error'
             });
@@ -371,7 +371,7 @@ const AdminPanel = () => {
         } catch (error) {
             console.error("Erro ao enviar comunicado geral:", error);
             notify({
-                title: 'Envio indisponivel',
+                title: 'Envio indisponível',
                 message: String(error?.message || 'Não foi possível enviar o comunicado geral.'),
                 variant: 'error'
             });
@@ -413,7 +413,7 @@ const AdminPanel = () => {
         } catch (error) {
             console.error("Erro ao ativar campanha:", error);
             notify({
-                title: 'Campanha nao ativada',
+                title: 'Campanha não ativada',
                 message: 'Não foi possível ativar a campanha.',
                 variant: 'error'
             });
@@ -438,7 +438,7 @@ const AdminPanel = () => {
 
         if (!id) {
             notify({
-                title: 'Identificador invalido',
+                title: 'Identificador inválido',
                 message: 'Não consegui gerar um identificador válido para a campanha.',
                 variant: 'error'
             });
@@ -473,7 +473,7 @@ const AdminPanel = () => {
         } catch (error) {
             console.error("Erro ao voltar para o modo normal:", error);
             notify({
-                title: 'Mudanca nao concluida',
+                title: 'Mudança não concluída',
                 message: 'Não foi possível voltar para o modo normal.',
                 variant: 'error'
             });
@@ -508,7 +508,7 @@ const AdminPanel = () => {
 
         if (confirmacaoExclusao.trim() !== campanhaParaExcluir.id) {
             notify({
-                title: 'Confirmacao incompleta',
+                title: 'Confirmação incompleta',
                 message: 'Digite o identificador exato da campanha para confirmar a exclusão.',
                 variant: 'warning'
             });
@@ -540,14 +540,14 @@ const AdminPanel = () => {
 
             fecharModalExclusaoCampanha(true);
             notify({
-                title: 'Campanha excluida',
+                title: 'Campanha excluída',
                 message: `Campanha "${campanhaExcluida.titulo || campanhaExcluida.id}" excluída com sucesso.`,
                 variant: 'success'
             });
         } catch (error) {
             console.error("Erro ao excluir campanha:", error);
             notify({
-                title: 'Exclusao nao concluida',
+                title: 'Exclusão não concluída',
                 message: 'Não foi possível excluir a campanha.',
                 variant: 'error'
             });

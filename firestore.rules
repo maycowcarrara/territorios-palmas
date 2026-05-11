@@ -27,6 +27,102 @@ service cloud.firestore {
              (getDadosUsuario().role == 'admin' || getDadosUsuario().role == 'comum');
     }
 
+    function camposAlteradosApenas(camposPermitidos) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(camposPermitidos);
+    }
+
+    function camposOperacionaisTerritorio() {
+      return [
+        'quadras_feitas',
+        'status',
+        'historico',
+        'ultimaConclusao',
+        'ultimaAlteracao',
+        'designadoPara',
+        'designadoNome',
+        'dataDesignacao',
+        'cicloAtual',
+        'nome'
+      ];
+    }
+
+    function camposOperacionaisContexto() {
+      return [
+        'quadras_feitas',
+        'status',
+        'historico',
+        'ultimaConclusao',
+        'ultimaAlteracao',
+        'designadoPara',
+        'designadoNome',
+        'dataDesignacao',
+        'cicloAtual',
+        'nome',
+        'territorioBaseId',
+        'territorioNumero',
+        'contextoId',
+        'contextoTipo',
+        'contextoTitulo'
+      ];
+    }
+
+    function camposNotasTerritorio() {
+      return ['nome', 'notas_quadras', 'ultimaAlteracao'];
+    }
+
+    function mantemOuLimpaDesignacaoPropria() {
+      return request.resource.data.designadoPara == resource.data.designadoPara ||
+             (
+               resource.data.designadoPara == meuEmail() &&
+               request.resource.data.designadoPara == null &&
+               request.resource.data.designadoNome == null &&
+               request.resource.data.dataDesignacao == null &&
+               request.resource.data.cicloAtual == null
+             );
+    }
+
+    function mantemNomeSalvo() {
+      return request.resource.data.nome == resource.data.nome ||
+             resource.data.nome == null;
+    }
+
+    function podeAtualizarTerritorioDesignado() {
+      return isAprovado() &&
+             resource.data.designadoPara == meuEmail() &&
+             camposAlteradosApenas(camposOperacionaisTerritorio()) &&
+             mantemOuLimpaDesignacaoPropria() &&
+             mantemNomeSalvo();
+    }
+
+    function podeAtualizarNotasTerritorio() {
+      return isAprovado() &&
+             camposAlteradosApenas(camposNotasTerritorio()) &&
+             mantemNomeSalvo();
+    }
+
+    function podeAtualizarContextoDesignado() {
+      return isAprovado() &&
+             resource.data.designadoPara == meuEmail() &&
+             camposAlteradosApenas(camposOperacionaisContexto()) &&
+             mantemOuLimpaDesignacaoPropria() &&
+             mantemNomeSalvo();
+    }
+
+    function notificacaoValida() {
+      return request.resource.data.keys().hasOnly([
+               'para',
+               'texto',
+               'data',
+               'lida',
+               'tipo',
+               'origem',
+               'tituloPush'
+             ]) &&
+             request.resource.data.para is string &&
+             request.resource.data.texto is string &&
+             request.resource.data.texto.size() <= 2000;
+    }
+
     match /usuarios/{email} {
       allow read: if estaLogado() && (isAdmin() || meuEmail() == email);
 
@@ -45,13 +141,16 @@ service cloud.firestore {
 
     match /territorios/{territorio} {
       allow read: if isAprovado();
-      allow update: if isAprovado();
+      allow update: if isAdmin() ||
+                    podeAtualizarTerritorioDesignado() ||
+                    podeAtualizarNotasTerritorio();
       allow create, delete: if isAdmin();
     }
 
     match /territorios_contexto/{territorioContexto} {
       allow read: if isAprovado();
-      allow create, update: if isAprovado();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || podeAtualizarContextoDesignado();
       allow delete: if isAdmin();
     }
 
@@ -71,7 +170,11 @@ service cloud.firestore {
         (resource.data.para == 'ADMINS' && isAdmin())
       );
 
-      allow create: if estaLogado();
+      allow create: if isAdmin() || (
+        estaLogado() &&
+        notificacaoValida() &&
+        (request.resource.data.para == 'ADMINS' || request.resource.data.para == meuEmail())
+      );
 
       allow delete: if estaLogado() && (
         resource.data.para == meuEmail() ||

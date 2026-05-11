@@ -10040,7 +10040,6 @@ console.log(`🚀 Versão ${novaVersao} definida com sucesso!`);
   "name": "territorios-palmas",
   "private": true,
   "version": "1.8.125",
-  "homepage": "https://maycowcarrara.github.io/territorios-palmas",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10070,7 +10069,6 @@ console.log(`🚀 Versão ${novaVersao} definida com sucesso!`);
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
-    "gh-pages": "^6.3.0",
     "globals": "^16.5.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
@@ -23358,7 +23356,6 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
         name: 'Territórios Palmas',
         short_name: 'Territórios',
@@ -23390,4 +23387,3 @@ export default defineConfig({
   ]
 })
 ```
-

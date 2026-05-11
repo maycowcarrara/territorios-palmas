@@ -18,7 +18,12 @@ export async function checkForUpdate(manual = false) {
                 await Promise.all(regs.map((registration) => registration.unregister()));
             }
 
-            window.location.href = `/?v=${data.version}`;
+            const baseUrl = import.meta.env.BASE_URL || '/';
+            const basePath = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+            const updateUrl = new URL(basePath, window.location.origin);
+            updateUrl.searchParams.set('v', data.version);
+            updateUrl.hash = window.location.hash;
+            window.location.href = updateUrl.toString();
         }
 
         return true;
