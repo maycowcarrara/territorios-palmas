@@ -385,6 +385,7 @@ export const UiFeedbackProvider = ({ children }) => {
     );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useUiFeedback = () => {
     const context = useContext(UiFeedbackContext);
     if (!context) {

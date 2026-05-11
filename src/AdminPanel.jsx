@@ -182,16 +182,21 @@ const AdminPanel = () => {
 
     // --- AÇÕES RÁPIDAS (ATUALIZADO COM CONFIRMAÇÃO) ---
     const mudarRole = async (user, novaRole) => {
-        // Define a mensagem baseada na ação
-        const alerta = novaRole === 'admin' 
-            ? `⚠️ ATENÇÃO: Você está prestes a tornar ${user.nome || user.id} um ADMINISTRADOR.\n\nEle terá acesso total ao sistema, incluindo edição e exclusão de dados.\n\nDeseja continuar?`
-            : `Deseja remover as permissões de administrador de ${user.nome || user.id}?`;
+        const nomeUsuario = user.nome || user.id;
+        const aprovandoUsuario = user.role === 'aguardando' && novaRole === 'comum';
+        const promovendoAdmin = novaRole === 'admin';
+        const rebaixandoAdmin = user.role === 'admin' && novaRole === 'comum';
+        const alerta = aprovandoUsuario
+            ? `Deseja aprovar o acesso de ${nomeUsuario} como dirigente?`
+            : promovendoAdmin
+                ? `⚠️ ATENÇÃO: Você está prestes a tornar ${nomeUsuario} um ADMINISTRADOR.\n\nEle terá acesso total ao sistema, incluindo edição e exclusão de dados.\n\nDeseja continuar?`
+                : `Deseja remover as permissões de administrador de ${nomeUsuario}?`;
 
         if (!(await confirm({
-            title: novaRole === 'admin' ? 'Promover para admin' : 'Remover permissao de admin',
+            title: aprovandoUsuario ? 'Aprovar usuario' : promovendoAdmin ? 'Promover para admin' : 'Remover permissao de admin',
             message: alerta,
-            tone: novaRole === 'admin' ? 'warning' : 'danger',
-            confirmLabel: novaRole === 'admin' ? 'Promover' : 'Remover'
+            tone: promovendoAdmin || rebaixandoAdmin ? 'warning' : 'info',
+            confirmLabel: aprovandoUsuario ? 'Aprovar' : promovendoAdmin ? 'Promover' : 'Remover'
         }))) {
             return;
         }

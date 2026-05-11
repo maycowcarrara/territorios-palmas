@@ -22,7 +22,7 @@ Defina no Worker:
 Ja previstas em `wrangler.toml`:
 
 - `FIREBASE_PROJECT_ID`
-- `FIREBASE_WEB_API_KEY`
+- `PUBLIC_APP_URL`
 
 ## Deploy
 

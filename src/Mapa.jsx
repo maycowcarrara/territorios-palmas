@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker, Polyline } from 'react-leaflet';
-import { onSnapshot, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, query, where, deleteField } from 'firebase/firestore';
+import { onSnapshot, setDoc, arrayUnion, arrayRemove, collection, getDocs, addDoc, deleteField } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { db } from './firebase';
@@ -452,6 +452,7 @@ const MarcadorUsuario = ({ posicao, direcao }) => {
                 frameAnimacaoRef.current = null;
             }
             posicaoAnimadaRef.current = null;
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setPosicaoAnimada(null);
             return undefined;
         }
@@ -909,7 +910,9 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
         await setDoc(baseRef, {
             nome,
-            [`notas_quadras.${quadraId}`]: novoArray,
+            notas_quadras: {
+                [quadraId]: novoArray
+            },
             ultimaAlteracao: new Date()
         }, { merge: true });
     };
@@ -927,7 +930,9 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
         await setDoc(baseRef, {
             nome,
-            [`notas_quadras.${quadraId}`]: novoArray,
+            notas_quadras: {
+                [quadraId]: novoArray
+            },
             ultimaAlteracao: new Date()
         }, { merge: true });
     };
@@ -945,7 +950,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
         if (!Array.isArray(notasAtuais)) {
             if (noteId === 'legacy') {
-                updates[`notas_quadras.${quadraId}`] = deleteField();
+                updates.notas_quadras = { [quadraId]: deleteField() };
                 await setDoc(baseRef, {
                     nome,
                     ...updates
@@ -955,7 +960,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
         }
 
         const novoArray = notasAtuais.filter(n => n.id !== noteId);
-        updates[`notas_quadras.${quadraId}`] = novoArray;
+        updates.notas_quadras = { [quadraId]: novoArray };
 
         await setDoc(baseRef, {
             nome,
@@ -1361,7 +1366,20 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs text-blue-800">{c.nome}</Tooltip>
                 </Marker>
             ))}
-            <ModalNota key={`${modalConfig.open ? 'open' : 'closed'}-${modalConfig.dados?.quadraId || 'sem-quadra'}`} isOpen={modalConfig.open} dados={modalConfig.dados} user={user} isAdmin={isAdmin} onClose={fecharModal} onAdicionar={adicionarNota} onEditar={editarNota} onExcluir={removerNota} />
+            <ModalNota
+                key={`${modalConfig.open ? 'open' : 'closed'}-${modalConfig.dados?.quadraId || 'sem-quadra'}`}
+                isOpen={modalConfig.open}
+                dados={modalConfig.dados ? {
+                    ...modalConfig.dados,
+                    notas: dadosBanco.notas_quadras?.[modalConfig.dados.quadraId]
+                } : null}
+                user={user}
+                isAdmin={isAdmin}
+                onClose={fecharModal}
+                onAdicionar={adicionarNota}
+                onEditar={editarNota}
+                onExcluir={removerNota}
+            />
             <ModalConfirmacaoFinalizacao
                 isOpen={confirmacaoFinalizacaoAberta}
                 onConfirmar={confirmarFinalizacao}

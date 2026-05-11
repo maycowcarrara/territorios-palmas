@@ -1,8 +1,11 @@
 const GOOGLE_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const FIREBASE_JWKS_URL = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 const ONESIGNAL_NOTIFICATIONS_URL = 'https://api.onesignal.com/notifications';
 
 let cachedAccessToken = null;
 let cachedAccessTokenExpiry = 0;
+let cachedFirebaseJwks = null;
+let cachedFirebaseJwksExpiry = 0;
 
 const json = (data, status = 200, extraHeaders = {}) =>
     new Response(JSON.stringify(data), {
@@ -32,6 +35,28 @@ const encodeBase64Url = (input) =>
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
         .replace(/=+$/g, '');
+
+const decodeBase64UrlString = (input) => {
+    const normalized = String(input || '').replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return new TextDecoder().decode(bytes);
+};
+
+const decodeBase64UrlBytes = (input) => {
+    const normalized = String(input || '').replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+};
 
 const pemToArrayBuffer = (pem) => {
     const normalized = pem
@@ -121,26 +146,89 @@ const getGoogleAccessToken = async (env) => {
     return cachedAccessToken;
 };
 
-const verifyFirebaseIdToken = async (idToken, env) => {
-    const apiKey = env.FIREBASE_WEB_API_KEY;
-    if (!apiKey) {
-        throw new Error('FIREBASE_WEB_API_KEY não configurada no Worker.');
+const parseMaxAgeSeconds = (cacheControl) => {
+    const match = String(cacheControl || '').match(/max-age=(\d+)/i);
+    return match ? Number(match[1]) : 3600;
+};
+
+const getFirebaseJwks = async () => {
+    const now = Math.floor(Date.now() / 1000);
+    if (cachedFirebaseJwks && cachedFirebaseJwksExpiry - 60 > now) {
+        return cachedFirebaseJwks;
     }
 
-    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ idToken })
-    });
-
+    const response = await fetch(FIREBASE_JWKS_URL);
     const data = await response.json();
-    if (!response.ok || !data?.users?.length) {
+    if (!response.ok || !Array.isArray(data.keys)) {
+        throw new Error('Não foi possível carregar as chaves públicas do Firebase.');
+    }
+
+    cachedFirebaseJwks = data.keys;
+    cachedFirebaseJwksExpiry = now + parseMaxAgeSeconds(response.headers.get('Cache-Control'));
+    return cachedFirebaseJwks;
+};
+
+const importFirebasePublicKey = async (jwk) =>
+    crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        {
+            name: 'RSASSA-PKCS1-v1_5',
+            hash: 'SHA-256'
+        },
+        false,
+        ['verify']
+    );
+
+const verifyFirebaseIdToken = async (idToken, env) => {
+    const parts = String(idToken || '').split('.');
+    if (parts.length !== 3) {
+        throw new Error('Sessão Firebase inválida.');
+    }
+
+    const [encodedHeader, encodedPayload, encodedSignature] = parts;
+    const header = JSON.parse(decodeBase64UrlString(encodedHeader));
+    const payload = JSON.parse(decodeBase64UrlString(encodedPayload));
+    if (header.alg !== 'RS256' || !header.kid) {
+        throw new Error('Sessão Firebase com assinatura inválida.');
+    }
+
+    const jwks = await getFirebaseJwks();
+    const jwk = jwks.find((key) => key.kid === header.kid);
+    if (!jwk) {
+        cachedFirebaseJwks = null;
+        throw new Error('Chave pública Firebase não encontrada para validar a sessão.');
+    }
+
+    const publicKey = await importFirebasePublicKey(jwk);
+    const encoder = new TextEncoder();
+    const validSignature = await crypto.subtle.verify(
+        'RSASSA-PKCS1-v1_5',
+        publicKey,
+        decodeBase64UrlBytes(encodedSignature),
+        encoder.encode(`${encodedHeader}.${encodedPayload}`)
+    );
+
+    const now = Math.floor(Date.now() / 1000);
+    const issuer = `https://securetoken.google.com/${env.FIREBASE_PROJECT_ID}`;
+    if (
+        !validSignature
+        || payload.aud !== env.FIREBASE_PROJECT_ID
+        || payload.iss !== issuer
+        || !payload.sub
+        || String(payload.sub).length > 128
+        || Number(payload.exp || 0) <= now
+        || Number(payload.iat || 0) > now + 300
+    ) {
         throw new Error('Não foi possível validar a sessão Firebase no Worker.');
     }
 
-    return data.users[0];
+    return {
+        localId: payload.user_id || payload.sub,
+        email: payload.email || '',
+        emailVerified: Boolean(payload.email_verified),
+        raw: payload
+    };
 };
 
 const parseFirestoreValue = (value) => {
