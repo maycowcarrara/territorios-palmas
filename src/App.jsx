@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { signInWithPopup, onAuthStateChanged } from 'firebase/auth';
 import { auth, googleProvider, db } from './firebase';
@@ -1337,11 +1337,28 @@ function LazyPage({ children }) {
   );
 }
 
-function AndroidBackButtonHandler() {
+const APP_ROUTE = '/app';
+const BACK_TO_EXIT_WINDOW_MS = 5000;
+
+function BackButtonExitHandler() {
   const navigate = useNavigate();
   const location = useLocation();
   const ultimaTentativaSaidaRef = useRef(0);
   const { notify } = useUiFeedback();
+
+  useEffect(() => {
+    ultimaTentativaSaidaRef.current = 0;
+  }, [location.pathname]);
+
+  const avisarSaida = useCallback(() => {
+    ultimaTentativaSaidaRef.current = Date.now();
+    notify({
+      title: 'Pressione novamente para sair',
+      message: 'Toque em voltar outra vez em até 5 segundos para fechar o app.',
+      variant: 'info',
+      durationMs: 3000
+    });
+  }, [notify]);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
@@ -1355,28 +1372,22 @@ function AndroidBackButtonHandler() {
         const rotaAtual = location.pathname;
 
         if (rotaAtual === '/admin' || rotaAtual === '/relatorios') {
-          navigate('/app');
+          navigate(APP_ROUTE);
           return;
         }
 
-        if (rotaAtual !== '/' && rotaAtual !== '/app') {
+        if (rotaAtual !== '/' && rotaAtual !== APP_ROUTE) {
           navigate(-1);
           return;
         }
 
         const agora = Date.now();
-        if (agora - ultimaTentativaSaidaRef.current <= 5000) {
+        if (agora - ultimaTentativaSaidaRef.current <= BACK_TO_EXIT_WINDOW_MS) {
           void CapacitorApp.exitApp();
           return;
         }
 
-        ultimaTentativaSaidaRef.current = agora;
-        notify({
-          title: 'Pressione novamente para sair',
-          message: 'Toque em voltar outra vez em ate 5 segundos para fechar o app.',
-          variant: 'info',
-          durationMs: 3000
-        });
+        avisarSaida();
       });
     };
 
@@ -1387,7 +1398,55 @@ function AndroidBackButtonHandler() {
         void listenerHandle.remove();
       }
     };
-  }, [location.pathname, navigate, notify]);
+  }, [avisarSaida, location.pathname, navigate]);
+
+  useEffect(() => {
+    if (Capacitor.isNativePlatform() || location.pathname !== APP_ROUTE || typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const isStandalonePwa = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator?.standalone === true;
+    const isTouchDevice = window.matchMedia?.('(pointer: coarse)').matches;
+
+    if (!isStandalonePwa && !isTouchDevice) {
+      return undefined;
+    }
+
+    let liberarProximoVoltar = false;
+
+    const armarHistoricoDeSaida = () => {
+      const stateAtual = window.history.state || {};
+      if (stateAtual?.territoriosBackExitGuard) return;
+
+      window.history.pushState(
+        { ...stateAtual, territoriosBackExitGuard: true },
+        '',
+        window.location.href
+      );
+    };
+
+    const handlePopState = () => {
+      if (liberarProximoVoltar) return;
+
+      const agora = Date.now();
+      if (agora - ultimaTentativaSaidaRef.current <= BACK_TO_EXIT_WINDOW_MS) {
+        liberarProximoVoltar = true;
+        window.removeEventListener('popstate', handlePopState);
+        window.history.back();
+        return;
+      }
+
+      avisarSaida();
+      armarHistoricoDeSaida();
+    };
+
+    armarHistoricoDeSaida();
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [avisarSaida, location.pathname]);
 
   return null;
 }
@@ -1397,7 +1456,7 @@ function App() {
   return (
     <UiFeedbackProvider>
       <HashRouter>
-        <AndroidBackButtonHandler />
+        <BackButtonExitHandler />
         <AutoUpdate />
         <Routes>
           <Route path="/" element={<Login />} />

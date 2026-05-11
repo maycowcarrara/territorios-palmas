@@ -1,7 +1,7 @@
 {
   "name": "territorios-palmas",
   "private": true,
-  "version": "2.2.195",
+  "version": "2.2.203",
   "homepage": "https://maycowcarrara.github.io/territorios-palmas",
   "type": "module",
   "scripts": {
@@ -15,6 +15,8 @@
     "cap:android": "npx cap open android",
     "android:sync": "npx cap sync android",
     "android:copy-apk": "node scripts/copy-android-apk.cjs",
+    "android:version": "node scripts/sync-android-version.cjs",
+    "android:copy-release": "node scripts/copy-android-release.cjs",
     "android:avd:list": "node scripts/android-emulator.cjs --list",
     "android:emu": "node scripts/android-emulator.cjs",
     "android:emu:wait": "node scripts/android-emulator.cjs --wait",
@@ -27,6 +29,8 @@
     "android:apk": "npm run android:debug",
     "android:debug-install": "npm run android:debug && npm run android:install",
     "android:run": "npm run android:debug && npm run android:emu:wait && npm run android:launch",
+    "android:release": "npm run build && npm run android:version && npm run android:sync && cd android && gradlew.bat assembleRelease bundleRelease && cd .. && npm run android:copy-release",
+    "android:play": "npm run android:release",
     "worker:install": "npm --prefix workers/notifications-relay install",
     "worker:dev": "npm --prefix workers/notifications-relay run dev",
     "worker:deploy": "npm --prefix workers/notifications-relay run deploy",

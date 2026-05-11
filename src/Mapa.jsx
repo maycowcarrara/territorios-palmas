@@ -36,6 +36,18 @@ const cssTooltip = `
   .label-tempo { display: block; font-size: 10px; font-weight: 800; color: #7f1d1d; margin-top: 2px; text-shadow: 1px 1px 0px rgba(255,255,255,0.8); text-transform: uppercase; }
   .label-tempo-compacto { display: inline-block; font-size: 9px; font-weight: 800; color: #7c2d12; margin-top: 1px; padding: 1px 5px; border-radius: 999px; background: rgba(255,255,255,0.72); border: 1px solid rgba(194, 65, 12, 0.18); text-shadow: 1px 1px 0px rgba(255,255,255,0.7); text-transform: uppercase; letter-spacing: 0.2px; }
   .sem-fundo { background: transparent; border: none; box-shadow: none; }
+  .map-poi-marker { width: 26px; height: 26px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.94); border: 2px solid rgba(255,255,255,0.98); box-shadow: 0 3px 10px rgba(15,23,42,0.32), 0 0 0 1px rgba(15,23,42,0.08); font-size: 18px; line-height: 1; cursor: help; }
+  .map-poi-marker.ref { border-color: #f43f5e; }
+  .map-poi-marker.condo { border-color: #2563eb; }
+  .control-hint { position: absolute; z-index: 20; top: 50%; transform: translateY(-50%); white-space: nowrap; border-radius: 999px; background: rgba(15,23,42,0.72); color: white; font-size: 11px; font-weight: 700; line-height: 1; padding: 7px 10px; box-shadow: 0 6px 16px rgba(15,23,42,0.18); pointer-events: none; animation: control-hint-fade 4s ease-in-out forwards; }
+  .control-hint.left-side { left: 58px; }
+  .control-hint.right-side { right: 58px; }
+  @keyframes control-hint-fade {
+    0% { opacity: 0; transform: translateY(-50%) translateY(4px); }
+    15% { opacity: 1; transform: translateY(-50%) translateY(0); }
+    78% { opacity: 1; transform: translateY(-50%) translateY(0); }
+    100% { opacity: 0; transform: translateY(-50%) translateY(-4px); }
+  }
   
   .map-layer-btn { width: 48px; height: 48px; border-radius: 8px; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer; transition: transform 0.1s, border-color 0.2s; overflow: hidden; position: relative; background-size: cover; }
   .map-layer-btn:active { transform: scale(0.95); }
@@ -152,7 +164,7 @@ const DeepLinkHandler = () => {
 
 // --- COMPONENTES DE UI ---
 
-const SeletorCamadas = ({ tipoMapa, setTipoMapa, showRefs, setShowRefs, showCondos, setShowCondos }) => {
+const SeletorCamadas = ({ tipoMapa, setTipoMapa, showRefs, setShowRefs, showCondos, setShowCondos, mostrarDicas }) => {
     const alternarCamada = () => {
         if (tipoMapa === 'google') setTipoMapa('satelite');
         else if (tipoMapa === 'satelite') setTipoMapa('padrao');
@@ -175,23 +187,35 @@ const SeletorCamadas = ({ tipoMapa, setTipoMapa, showRefs, setShowRefs, showCond
 
     return (
         <div className="absolute bottom-6 left-4 z-[400] flex flex-col gap-3">
-            <button onClick={() => setShowRefs(!showRefs)} className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showRefs ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400'}`} title="Mostrar/Ocultar Pontos de Referência">📍</button>
-            <button onClick={() => setShowCondos(!showCondos)} className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showCondos ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-400'}`} title="Mostrar/Ocultar Condomínios">🏢</button>
-            <button onClick={alternarCamada} className={`map-layer-btn ${classeBotao}`} title={tituloBotao} />
+            <div className="relative">
+                <button onClick={() => setShowRefs(!showRefs)} className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showRefs ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400'}`} title="Mostrar/Ocultar Pontos de Referência">📍</button>
+                {mostrarDicas && <span className="control-hint left-side">Pontos de referência</span>}
+            </div>
+            <div className="relative">
+                <button onClick={() => setShowCondos(!showCondos)} className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showCondos ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-400'}`} title="Mostrar/Ocultar Condomínios">🏢</button>
+                {mostrarDicas && <span className="control-hint left-side">Condomínios</span>}
+            </div>
+            <div className="relative">
+                <button onClick={alternarCamada} className={`map-layer-btn ${classeBotao}`} title={tituloBotao} />
+                {mostrarDicas && <span className="control-hint left-side">Mudar mapa</span>}
+            </div>
         </div>
     );
 };
 
-const ControleVisibilidade = ({ ocultarCores, setOcultarCores }) => {
+const ControleVisibilidade = ({ ocultarCores, setOcultarCores, mostrarDicas }) => {
     return (
         <div className="absolute top-4 right-4 z-[400] flex flex-col gap-2">
-            <button onClick={() => setOcultarCores(!ocultarCores)} className={`w-12 h-12 flex items-center justify-center rounded-full shadow-xl border transition-all duration-200 active:scale-95 ${ocultarCores ? 'bg-blue-600 text-white border-blue-700' : 'bg-white text-slate-500 border-slate-300'}`} title={ocultarCores ? "Mostrar Cores" : "Ocultar Cores (Ver Mapa)"}>
-                {ocultarCores ? (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-                )}
-            </button>
+            <div className="relative">
+                <button onClick={() => setOcultarCores(!ocultarCores)} className={`w-12 h-12 flex items-center justify-center rounded-full shadow-xl border transition-all duration-200 active:scale-95 ${ocultarCores ? 'bg-blue-600 text-white border-blue-700' : 'bg-white text-slate-500 border-slate-300'}`} title={ocultarCores ? "Mostrar Cores" : "Ocultar Cores (Ver Mapa)"}>
+                    {ocultarCores ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                    )}
+                </button>
+                {mostrarDicas && <span className="control-hint right-side">Ocultar cores</span>}
+            </div>
         </div>
     );
 };
@@ -201,7 +225,8 @@ const ControlesNavegacao = ({
     setRastreandoLocalizacao,
     setPosicaoUsuario,
     setTrilhaUsuario,
-    setDirecaoUsuario
+    setDirecaoUsuario,
+    mostrarDicas
 }) => {
     const map = useMap();
     const { notify } = useUiFeedback();
@@ -431,10 +456,17 @@ const ControlesNavegacao = ({
                     <span className={`block w-1.5 h-1.5 rounded-full ${rastreandoLocalizacao ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
                     {rastreandoLocalizacao ? 'ON' : 'OFF'}
                 </span>
+                {mostrarDicas && <span className="control-hint right-side">Ligar GPS</span>}
             </button>
-            <div className="flex flex-col shadow-xl rounded-xl overflow-hidden border border-slate-200 bg-white">
-                <button onClick={() => map.zoomIn()} className="w-12 h-12 flex items-center justify-center text-slate-600 border-b border-slate-100"><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
-                <button onClick={() => map.zoomOut()} className="w-12 h-12 flex items-center justify-center text-slate-600"><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M19.5 12h-15" /></svg></button>
+            <div className="flex flex-col shadow-xl rounded-xl border border-slate-200 bg-white">
+                <div className="relative">
+                    <button onClick={() => map.zoomIn()} className="w-12 h-12 flex items-center justify-center text-slate-600 border-b border-slate-100"><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
+                    {mostrarDicas && <span className="control-hint right-side">Aumentar zoom</span>}
+                </div>
+                <div className="relative">
+                    <button onClick={() => map.zoomOut()} className="w-12 h-12 flex items-center justify-center text-slate-600"><svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path d="M19.5 12h-15" /></svg></button>
+                    {mostrarDicas && <span className="control-hint right-side">Diminuir zoom</span>}
+                </div>
             </div>
         </div>
     );
@@ -1351,8 +1383,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 />
             ))}
             {deveMostrarQuadras && showRefs && pontosFiltrados.referencias.map((ref, idx) => (
-                <Marker key={`t-${idTerritorio}-ref-${idx}`} position={[ref.lat, ref.lng]} icon={L.divIcon({ className: 'bg-transparent', html: `<div class="text-xl drop-shadow-sm cursor-help">📍</div>`, iconAnchor: [12, 12] })}>
-                    <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs">{ref.nome}</Tooltip>
+                <Marker key={`t-${idTerritorio}-ref-${idx}`} position={[ref.lat, ref.lng]} icon={L.divIcon({ className: 'bg-transparent', html: `<div class="map-poi-marker ref">📍</div>`, iconAnchor: [13, 13] })}>
+                    <Tooltip direction="top" offset={[0, -14]} className="font-bold text-xs">{ref.nome}</Tooltip>
                     <Popup>
                         <div className="flex flex-col items-center gap-2 p-1 min-w-[150px]">
                             <h3 className="font-bold text-gray-800 text-sm">{ref.nome}</h3>
@@ -1362,8 +1394,8 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                 </Marker>
             ))}
             {deveMostrarQuadras && showCondos && pontosFiltrados.condominios.map((c, idx) => (
-                <Marker key={`t-${idTerritorio}-cdo-${idx}`} position={[c.lat, c.lng]} icon={L.divIcon({ className: 'bg-transparent', html: `<div class="relative group"><div class="text-xl drop-shadow-sm cursor-help">🏢</div>${(dadosBanco.notas_quadras?.[c.nome]?.length || (typeof dadosBanco.notas_quadras?.[c.nome] === 'string' && dadosBanco.notas_quadras?.[c.nome])) ? '<span class="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 border-2 border-white rounded-full shadow-sm z-50"></span>' : ''}</div>`, iconAnchor: [12, 12] })} eventHandlers={{ click: (e) => { L.DomEvent.stopPropagation(e); abrirModalNota(c.nome, dadosBanco.notas_quadras?.[c.nome]); } }}>
-                    <Tooltip direction="top" offset={[0, -10]} className="font-bold text-xs text-blue-800">{c.nome}</Tooltip>
+                <Marker key={`t-${idTerritorio}-cdo-${idx}`} position={[c.lat, c.lng]} icon={L.divIcon({ className: 'bg-transparent', html: `<div class="relative group map-poi-marker condo">🏢${(dadosBanco.notas_quadras?.[c.nome]?.length || (typeof dadosBanco.notas_quadras?.[c.nome] === 'string' && dadosBanco.notas_quadras?.[c.nome])) ? '<span class="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 border-2 border-white rounded-full shadow-sm z-50"></span>' : ''}</div>`, iconAnchor: [13, 13] })} eventHandlers={{ click: (e) => { L.DomEvent.stopPropagation(e); abrirModalNota(c.nome, dadosBanco.notas_quadras?.[c.nome]); } }}>
+                    <Tooltip direction="top" offset={[0, -14]} className="font-bold text-xs text-blue-800">{c.nome}</Tooltip>
                 </Marker>
             ))}
             <ModalNota
@@ -1402,8 +1434,9 @@ const Mapa = ({ user, isAdmin, contextoSistema }) => {
     const [rastreandoLocalizacao, setRastreandoLocalizacao] = useState(false);
     const [tipoMapa, setTipoMapa] = useState('google');
     const [ocultarCores, setOcultarCores] = useState(false);
-    const [showRefs, setShowRefs] = useState(true);
+    const [showRefs, setShowRefs] = useState(false);
     const [showCondos, setShowCondos] = useState(true);
+    const [mostrarDicasControles, setMostrarDicasControles] = useState(true);
 
     useEffect(() => {
         loadMapaData()
@@ -1421,6 +1454,11 @@ const Mapa = ({ user, isAdmin, contextoSistema }) => {
         };
         carregarUsuarios();
     }, [isAdmin]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setMostrarDicasControles(false), 4000);
+        return () => window.clearTimeout(timer);
+    }, []);
 
     const MapEvents = () => {
         const map = useMapEvents({ zoomend: () => setZoomLevel(map.getZoom()) });
@@ -1440,14 +1478,15 @@ const Mapa = ({ user, isAdmin, contextoSistema }) => {
                     {tipoMapa === 'google' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
                     {tipoMapa === 'satelite' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
 
-                    <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} showRefs={showRefs} setShowRefs={setShowRefs} showCondos={showCondos} setShowCondos={setShowCondos} />
-                    <ControleVisibilidade ocultarCores={ocultarCores} setOcultarCores={setOcultarCores} />
+                    <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} showRefs={showRefs} setShowRefs={setShowRefs} showCondos={showCondos} setShowCondos={setShowCondos} mostrarDicas={mostrarDicasControles} />
+                    <ControleVisibilidade ocultarCores={ocultarCores} setOcultarCores={setOcultarCores} mostrarDicas={mostrarDicasControles} />
                     <ControlesNavegacao
                         rastreandoLocalizacao={rastreandoLocalizacao}
                         setRastreandoLocalizacao={setRastreandoLocalizacao}
                         setPosicaoUsuario={setPosicaoUsuario}
                         setTrilhaUsuario={setTrilhaUsuario}
                         setDirecaoUsuario={setDirecaoUsuario}
+                        mostrarDicas={mostrarDicasControles}
                     />
                     {trilhaUsuario.length > 1 && (
                         <Polyline positions={trilhaUsuario} pathOptions={{ color: '#94a3b8', weight: 4, opacity: 0.38, lineCap: 'round', lineJoin: 'round' }} />
