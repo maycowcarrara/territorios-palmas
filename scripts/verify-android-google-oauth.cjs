@@ -26,7 +26,7 @@ const readProperties = (filePath) => {
   return props;
 };
 
-const extractSha1 = ({ keystore, alias, storepass, keypass }) => {
+const extractFingerprints = ({ keystore, alias, storepass, keypass }) => {
   const args = ['-list', '-v', '-keystore', keystore, '-alias', alias, '-storepass', storepass];
   if (keypass) args.push('-keypass', keypass);
 
@@ -36,12 +36,14 @@ const extractSha1 = ({ keystore, alias, storepass, keypass }) => {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  const match = output.match(/SHA1:\s*([A-Fa-f0-9:]+)/);
-  if (!match) {
-    throw new Error(`Nao foi possivel encontrar SHA1 para ${keystore} (${alias}).`);
+  const sha1 = output.match(/SHA1:\s*([A-Fa-f0-9:]+)/)?.[1];
+  const sha256 = output.match(/SHA256:\s*([A-Fa-f0-9:]+)/)?.[1];
+
+  if (!sha1 || !sha256) {
+    throw new Error(`Nao foi possivel encontrar SHA1/SHA256 para ${keystore} (${alias}).`);
   }
 
-  return match[1];
+  return { sha1, sha256 };
 };
 
 const loadRegisteredAndroidSha1 = () => {
@@ -70,7 +72,7 @@ const loadRegisteredAndroidSha1 = () => {
 const expected = [
   {
     label: 'debug',
-    sha1: extractSha1({
+    ...extractFingerprints({
       keystore: path.join(androidAppDir, 'debug-territorios.keystore'),
       alias: 'territoriosdebug',
       storepass: 'territoriosdebug',
@@ -84,7 +86,7 @@ const releaseProps = readProperties(keyPropertiesPath);
 if (releaseProps.storeFile && releaseProps.keyAlias && releaseProps.storePassword) {
   expected.push({
     label: 'release',
-    sha1: extractSha1({
+    ...extractFingerprints({
       keystore: path.resolve(androidAppDir, releaseProps.storeFile),
       alias: releaseProps.keyAlias,
       storepass: releaseProps.storePassword,
@@ -112,3 +114,8 @@ if (missing.length > 0) {
 }
 
 console.log('Google Sign-In Android OK: SHA-1 de debug/release encontrados no google-services.json.');
+console.log('');
+console.log('Confira tambem no Firebase Console se estes SHA-256 estao cadastrados:');
+for (const item of expected) {
+  console.log(`- ${item.label}: ${item.sha256}`);
+}

@@ -1,7 +1,7 @@
 {
   "name": "territorios-palmas",
   "private": true,
-  "version": "2.2.207",
+  "version": "2.2.208",
   "type": "module",
   "scripts": {
     "dev": "vite",
