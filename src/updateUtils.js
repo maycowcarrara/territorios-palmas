@@ -1,7 +1,12 @@
 import appInfo from './version.json';
+import { checkNativeLiveUpdate, isNativeLiveUpdateAvailable } from './nativeLiveUpdate';
 
 export async function checkForUpdate(manual = false) {
     try {
+        if (isNativeLiveUpdateAvailable()) {
+            return await checkNativeLiveUpdate(manual);
+        }
+
         const baseUrl = import.meta.env.BASE_URL;
         const response = await fetch(`${baseUrl}version.json?t=${Date.now()}`, {
             cache: 'no-store'

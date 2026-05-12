@@ -71,8 +71,8 @@ function Login() {
       return 'A configuração nativa do login Google no Android ainda não está válida.';
     }
 
-    if (mensagem.includes('10:')) {
-      return 'O Google recusou o login no Android. Normalmente isso indica SHA ou google-services.json desatualizado.';
+    if (mensagem.includes('10:') || mensagem.includes('28444') || mensagem.includes('Developer console is not set up correctly')) {
+      return 'O Google recusou o login no Android. Verifique se o SHA-1/SHA-256 do APK está cadastrado no Firebase/Google Cloud e baixe um google-services.json atualizado.';
     }
 
     if (mensagem.includes('16:')) {
