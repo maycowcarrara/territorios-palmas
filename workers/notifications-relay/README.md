@@ -8,7 +8,7 @@ Worker Cloudflare para:
 - enviar push pelo OneSignal usando o e-mail do usuário como `external_id`
 - usar FCM como fallback se OneSignal não estiver configurado
 
-## Segredos
+## Segredos por instância
 
 Defina no Worker:
 
@@ -16,6 +16,23 @@ Defina no Worker:
 - `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
 - `ONESIGNAL_APP_ID`
 - `ONESIGNAL_REST_API_KEY`
+
+Cada congregação tem um Worker separado. Use sempre o arquivo de config da instância para evitar gravar secret no Worker errado:
+
+```bash
+wrangler secret put GOOGLE_SERVICE_ACCOUNT_EMAIL --config wrangler.general.toml
+wrangler secret put GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY --config wrangler.general.toml
+wrangler secret put ONESIGNAL_APP_ID --config wrangler.general.toml
+wrangler secret put ONESIGNAL_REST_API_KEY --config wrangler.general.toml
+```
+
+Para conferir apenas quais secrets existem, sem exibir os valores:
+
+```bash
+wrangler secret list --config wrangler.general.toml
+```
+
+O envio pelo OneSignal só fica ativo quando `ONESIGNAL_APP_ID` e `ONESIGNAL_REST_API_KEY` existem no Worker. Se faltar algum deles, o relay usa o fallback FCM.
 
 ## Variaveis
 
@@ -27,8 +44,5 @@ Ja previstas em `wrangler.toml`:
 ## Deploy
 
 1. `npm install`
-2. `wrangler secret put GOOGLE_SERVICE_ACCOUNT_EMAIL`
-3. `wrangler secret put GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
-4. `wrangler secret put ONESIGNAL_APP_ID`
-5. `wrangler secret put ONESIGNAL_REST_API_KEY`
-6. `wrangler deploy`
+2. Configure os secrets da instância
+3. `wrangler deploy --config wrangler.general.toml`

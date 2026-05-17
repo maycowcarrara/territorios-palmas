@@ -439,24 +439,32 @@ const enviarMensagemOneSignal = async (env, { externalIds, titulo, mensagem, tip
     });
 
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
+    const errors = Array.isArray(data.errors) ? data.errors : (data.errors ? [data.errors] : []);
+    const enviados = Number(data.recipients || 0);
+
+    if (!response.ok || errors.length) {
         console.error('Falha ao enviar push OneSignal:', {
             status: response.status,
             externalIds: aliases.length,
             error: data
         });
-        return { ok: false, error: data };
+        return {
+            ok: false,
+            enviados,
+            error: data,
+            id: data.id || null
+        };
     }
 
     console.log('Push OneSignal enviado:', {
         id: data.id || null,
-        recipients: data.recipients ?? null,
+        recipients: enviados,
         externalIds: aliases.length
     });
 
     return {
         ok: true,
-        enviados: Number(data.recipients || aliases.length),
+        enviados,
         id: data.id || null
     };
 };
@@ -491,6 +499,20 @@ const getTokensDestinatarios = (destinatarios) => [...new Set(
 const getExternalIdsDestinatarios = (destinatarios) => [...new Set(
     destinatarios.map((user) => user.id).filter(Boolean)
 )];
+
+const podeUsuarioNotificarAdmins = ({ usuarioRemetente, tipo, origem }) => {
+    if (origem !== 'sistema') return false;
+
+    if (tipo === 'cadastro') {
+        return usuarioRemetente?.role === 'aguardando';
+    }
+
+    if (tipo === 'conclusao' || tipo === 'devolucao') {
+        return usuarioRemetente?.role === 'admin' || usuarioRemetente?.role === 'comum';
+    }
+
+    return false;
+};
 
 const buildNotificacoesBroadcast = (destino, mensagem, agora, destinatarios) => {
     if (destino === 'admins') {
@@ -571,6 +593,21 @@ const getPushConfigNotificacao = ({ para, tipo, tituloPush }) => {
     };
 };
 
+const enviarPushesFcm = async (env, accessToken, { titulo, mensagem, tipo, tokens, targetRoute }) => {
+    const resultados = await Promise.all(tokens.map((token) => enviarMensagemFcm(env, accessToken, {
+        token,
+        titulo,
+        mensagem,
+        tipo,
+        targetRoute
+    })));
+
+    return {
+        pushesEnviados: resultados.filter((item) => item.ok).length,
+        pushesFalharam: resultados.filter((item) => !item.ok).length
+    };
+};
+
 const enviarPushes = async (env, accessToken, { titulo, mensagem, tipo, tokens, externalIds, targetRoute }) => {
     if (oneSignalDisponivel(env)) {
         const resultado = await enviarMensagemOneSignal(env, {
@@ -581,6 +618,24 @@ const enviarPushes = async (env, accessToken, { titulo, mensagem, tipo, tokens, 
             targetRoute
         });
 
+        if (!resultado.ok && resultado.enviados === 0 && tokens.length) {
+            const fallbackFcm = await enviarPushesFcm(env, accessToken, {
+                titulo,
+                mensagem,
+                tipo,
+                tokens,
+                targetRoute
+            });
+
+            return {
+                canal: 'onesignal+fcm',
+                pushesEnviados: fallbackFcm.pushesEnviados,
+                pushesFalharam: fallbackFcm.pushesFalharam,
+                erroPush: resultado.error,
+                mensagemId: resultado.id || null
+            };
+        }
+
         return {
             canal: 'onesignal',
             pushesEnviados: resultado.ok ? resultado.enviados : 0,
@@ -590,18 +645,18 @@ const enviarPushes = async (env, accessToken, { titulo, mensagem, tipo, tokens, 
         };
     }
 
-    const resultados = await Promise.all(tokens.map((token) => enviarMensagemFcm(env, accessToken, {
-        token,
+    const resultadoFcm = await enviarPushesFcm(env, accessToken, {
         titulo,
         mensagem,
         tipo,
+        tokens,
         targetRoute
-    })));
+    });
 
     return {
         canal: 'fcm',
-        pushesEnviados: resultados.filter((item) => item.ok).length,
-        pushesFalharam: resultados.filter((item) => !item.ok).length,
+        pushesEnviados: resultadoFcm.pushesEnviados,
+        pushesFalharam: resultadoFcm.pushesFalharam,
         erroPush: null,
         mensagemId: null
     };
@@ -700,6 +755,10 @@ export default {
 
                 if (para !== 'ADMINS' && !isAdmin) {
                     return json({ error: 'Somente administradores podem enviar notificações para outros usuários.' }, 403, headers);
+                }
+
+                if (para === 'ADMINS' && !isAdmin && !podeUsuarioNotificarAdmins({ usuarioRemetente, tipo, origem })) {
+                    return json({ error: 'Este tipo de notificação para administradores não é permitido.' }, 403, headers);
                 }
 
                 const destinatarios = getDestinatariosNotificacao({ usuarios, para });

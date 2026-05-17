@@ -6,6 +6,7 @@ const projectRoot = path.resolve(__dirname, '..');
 const androidAppDir = path.join(projectRoot, 'android', 'app');
 const googleServicesPath = path.join(androidAppDir, 'google-services.json');
 const keyPropertiesPath = path.join(projectRoot, 'android', 'key.properties');
+const instancePropertiesPath = path.join(androidAppDir, 'territorios-instance.properties');
 
 const normalizeSha = (value) => String(value || '').replace(/:/g, '').trim().toLowerCase();
 
@@ -54,8 +55,12 @@ const loadRegisteredAndroidSha1 = () => {
   const googleServices = JSON.parse(fs.readFileSync(googleServicesPath, 'utf8'));
   const clients = Array.isArray(googleServices.client) ? googleServices.client : [];
   const hashes = [];
+  const packageNames = new Set();
 
   for (const client of clients) {
+    const packageName = client.client_info?.android_client_info?.package_name;
+    if (packageName) packageNames.add(packageName);
+
     const oauthClients = Array.isArray(client.oauth_client) ? client.oauth_client : [];
 
     for (const oauthClient of oauthClients) {
@@ -66,7 +71,16 @@ const loadRegisteredAndroidSha1 = () => {
     }
   }
 
-  return hashes;
+  return {
+    hasAndroidOauthClients: hashes.length > 0,
+    hashes,
+    packageName: [...packageNames][0] || 'desconhecido'
+  };
+};
+
+const loadEnvFile = (mode) => {
+  const envPath = path.join(projectRoot, `.env.${mode}`);
+  return readProperties(envPath);
 };
 
 const expected = [
@@ -96,10 +110,27 @@ if (releaseProps.storeFile && releaseProps.keyAlias && releaseProps.storePasswor
 }
 
 const registered = loadRegisteredAndroidSha1();
-const registeredNormalized = new Set(registered.map(normalizeSha));
+const registeredNormalized = new Set(registered.hashes.map(normalizeSha));
 const missing = expected.filter((item) => !registeredNormalized.has(normalizeSha(item.sha1)));
+const activeInstance = readProperties(instancePropertiesPath).instance || null;
+const env = activeInstance ? loadEnvFile(activeInstance) : {};
+const googleWebClientId = env.VITE_GOOGLE_WEB_CLIENT_ID || env.VITE_GOOGLE_ANDROID_WEB_CLIENT_ID || '';
 
-if (missing.length > 0) {
+if (!googleWebClientId) {
+  console.error('Google Sign-In nativo Android ainda nao tem Web Client ID configurado.');
+  console.error('');
+  if (activeInstance) {
+    console.error(`Preencha VITE_GOOGLE_WEB_CLIENT_ID em .env.${activeInstance}.`);
+  } else {
+    console.error('Preencha VITE_GOOGLE_WEB_CLIENT_ID no arquivo .env da instancia ativa.');
+  }
+  console.error('');
+  console.error('Use o Client ID de OAuth 2.0 do tipo "Web application" do mesmo projeto Firebase/Google Cloud.');
+  console.error(`Package name Android ativo: ${registered.packageName}`);
+  process.exit(1);
+}
+
+if (registered.hasAndroidOauthClients && missing.length > 0) {
   console.error('Google Sign-In Android nao esta configurado para todas as assinaturas deste projeto.');
   console.error('');
   console.error('Cadastre estes SHA-1 no app Android do Firebase/Google Cloud e baixe um novo android/app/google-services.json:');
@@ -109,13 +140,24 @@ if (missing.length > 0) {
   }
 
   console.error('');
-  console.error('Package name esperado: br.com.territoriospalmas.app');
+  console.error(`Package name esperado: ${registered.packageName}`);
   process.exit(1);
 }
 
-console.log('Google Sign-In Android OK: SHA-1 de debug/release encontrados no google-services.json.');
+console.log('Google Sign-In Android: Web Client ID configurado.');
+console.log(`Package name Android ativo: ${registered.packageName}`);
+
+if (registered.hasAndroidOauthClients) {
+  console.log('SHA-1 de debug/release encontrados no google-services.json.');
+} else {
+  console.log('');
+  console.log('Aviso: o google-services.json nao trouxe oauth_client Android.');
+  console.log('Como o Firebase Console mostra as SHA cadastradas, isso pode ser apenas formato do arquivo baixado.');
+  console.log('Confira manualmente no Firebase Console se estas SHA-1/SHA-256 estao cadastradas no app Android ativo:');
+}
+
 console.log('');
-console.log('Confira tambem no Firebase Console se estes SHA-256 estao cadastrados:');
 for (const item of expected) {
-  console.log(`- ${item.label}: ${item.sha256}`);
+  console.log(`- ${item.label} SHA-1: ${item.sha1}`);
+  console.log(`- ${item.label} SHA-256: ${item.sha256}`);
 }

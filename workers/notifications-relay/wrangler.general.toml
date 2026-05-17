@@ -1,0 +1,8 @@
+name = "territorios-notifications-relay-general"
+main = "src/index.js"
+compatibility_date = "2026-04-04"
+account_id = "f379dc7e0f7bc551b49d1821cc57ad07"
+
+[vars]
+FIREBASE_PROJECT_ID = "territ-gc"
+PUBLIC_APP_URL = "https://territ-gc.web.app"

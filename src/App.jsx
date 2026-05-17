@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 
 import { HashRouter, Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { signInWithPopup, onAuthStateChanged } from 'firebase/auth';
 import { auth, googleProvider, db } from './firebase';
-import { collection, query, where, getDocs, onSnapshot, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { arrayUnion, collection, query, where, getDocs, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { signInWithGoogleNative, signOutGoogleNative } from './nativeGoogleAuth';
@@ -24,6 +24,10 @@ import { UiFeedbackProvider, useUiFeedback } from './uiFeedback';
 const Mapa = lazy(() => import('./Mapa'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
 const Relatorios = lazy(() => import('./Relatorios'));
+const APP_TITLE = import.meta.env.VITE_APP_TITLE || 'Territórios';
+const APP_SHORT_NAME = import.meta.env.VITE_APP_SHORT_NAME || 'Territórios';
+const APP_SUBTITLE = import.meta.env.VITE_APP_SUBTITLE || '';
+const APP_ICON_192 = import.meta.env.VITE_APP_ICON_192 || './icon-192.png';
 
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 let deferredPromptGlobal = null;
@@ -127,8 +131,8 @@ function Login() {
     <div className="flex items-center justify-center h-[100dvh] bg-gray-100">
       <div className="w-96 bg-white shadow-xl rounded-xl overflow-hidden border border-gray-200 m-4 animate-fade-in">
         <div className="p-8 text-center">
-          <h2 className="text-3xl font-bold text-blue-600 mb-2">Territórios</h2>
-          <p className="text-gray-500 mb-8">Palmas - PR</p>
+          <h2 className="text-3xl font-bold text-blue-600 mb-2">{APP_SHORT_NAME}</h2>
+          <p className="text-gray-500 mb-8">{APP_SUBTITLE || APP_TITLE}</p>
           <div className="flex flex-col gap-4">
             <button
               onClick={handleGoogleLogin}
@@ -184,17 +188,70 @@ const SininhoNotificacoes = ({
 }) => {
   const [notificacoes, setNotificacoes] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
+  const { notify } = useUiFeedback();
+  const idsNotificadosRef = useRef(new Set());
+  const snapshotsIniciaisRef = useRef({ pessoais: false, admins: false });
 
   useEffect(() => {
     if (!user) return;
+    const emailNormalizado = user.email.toLowerCase();
     const q1 = query(collection(db, "notificacoes"), where("para", "==", user.email));
     const unsubs = [];
+    idsNotificadosRef.current = new Set();
+    snapshotsIniciaisRef.current = { pessoais: false, admins: false };
+
+    const getTituloNotificacao = (notif) => {
+      const titulos = {
+        cadastro: 'Novo cadastro',
+        comunicado: 'Comunicado',
+        conclusao: 'Território finalizado',
+        devolucao: 'Território devolvido',
+        sistema: 'Notificação'
+      };
+
+      return titulos[notif.tipo] || 'Notificação';
+    };
+
+    const notificacaoEstaLida = (notif) => {
+      if (notif.escopoNotificacao === 'admins') {
+        return Array.isArray(notif.lidaPor) && notif.lidaPor.includes(emailNormalizado);
+      }
+
+      return Boolean(notif.lida);
+    };
+
+    const filtrarNaoLidas = (lista) => lista.filter((notif) => !notificacaoEstaLida(notif));
+
+    const registrarNotificacoesInApp = (lista, escopo) => {
+      const chaveSnapshot = escopo === 'admins' ? 'admins' : 'pessoais';
+      const snapshotInicialConcluido = snapshotsIniciaisRef.current[chaveSnapshot];
+
+      filtrarNaoLidas(lista).forEach((notif) => {
+        if (idsNotificadosRef.current.has(notif.id)) return;
+
+        idsNotificadosRef.current.add(notif.id);
+
+        if (snapshotInicialConcluido) {
+          notify({
+            title: getTituloNotificacao(notif),
+            message: notif.texto,
+            variant: notif.tipo === 'devolucao' || notif.tipo === 'conclusao' ? 'success' : 'info'
+          });
+        }
+      });
+
+      snapshotsIniciaisRef.current = {
+        ...snapshotsIniciaisRef.current,
+        [chaveSnapshot]: true
+      };
+    };
 
     const unsub1 = onSnapshot(q1, (snap) => {
       const minhas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      registrarNotificacoesInApp(minhas, 'pessoais');
       setNotificacoes(prev => {
         const outras = prev.filter(p => p.escopoNotificacao === 'admins');
-        const listaFinal = [...outras, ...minhas];
+        const listaFinal = [...outras, ...filtrarNaoLidas(minhas)];
         return listaFinal.sort((a, b) => (b.data?.seconds || 0) - (a.data?.seconds || 0));
       });
     });
@@ -204,19 +261,33 @@ const SininhoNotificacoes = ({
       const q2 = query(collection(db, "notificacoes"), where("para", "==", "ADMINS"));
       const unsub2 = onSnapshot(q2, (snap) => {
         const deAdmin = snap.docs.map(d => ({ id: d.id, ...d.data(), escopoNotificacao: 'admins' }));
+        registrarNotificacoesInApp(deAdmin, 'admins');
         setNotificacoes(prev => {
           const pessoais = prev.filter(p => p.escopoNotificacao !== 'admins');
-          const listaFinal = [...pessoais, ...deAdmin];
+          const listaFinal = [...pessoais, ...filtrarNaoLidas(deAdmin)];
           return listaFinal.sort((a, b) => (b.data?.seconds || 0) - (a.data?.seconds || 0));
         });
       });
       unsubs.push(unsub2);
     }
     return () => unsubs.forEach(u => u());
-  }, [user, isAdmin]);
+  }, [user, isAdmin, notify]);
 
-  const limparNotificacao = async (id) => {
-    try { await deleteDoc(doc(db, "notificacoes", id)); } catch (e) { console.error("Erro ao limpar notificação:", e); }
+  const limparNotificacao = async (notif) => {
+    try {
+      const notificacaoRef = doc(db, "notificacoes", notif.id);
+
+      if (notif.escopoNotificacao === 'admins') {
+        await updateDoc(notificacaoRef, {
+          lidaPor: arrayUnion(user.email.toLowerCase())
+        });
+        return;
+      }
+
+      await updateDoc(notificacaoRef, { lida: true });
+    } catch (e) {
+      console.error("Erro ao limpar notificação:", e);
+    }
   };
 
   const temNovas = notificacoes.length > 0;
@@ -280,7 +351,7 @@ const SininhoNotificacoes = ({
                         </p>
                       </div>
                       <button
-                        onClick={() => limparNotificacao(notif.id)}
+                        onClick={() => limparNotificacao(notif)}
                         className="text-gray-300 hover:text-red-500 self-start p-1 hover:bg-red-50 rounded transition-colors"
                         title="Marcar como lida"
                       >
@@ -1180,7 +1251,7 @@ function Dashboard() {
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           {/* Logo: Visível no mobile (sm:hidden esconde em telas maiores) */}
           <img 
-            src="./icon-192.png" 
+            src={APP_ICON_192} 
             alt="Logo" 
             className={`h-9 w-9 rounded-lg shadow-sm ${temaSistema.headerBorder} border sm:hidden`} 
           />

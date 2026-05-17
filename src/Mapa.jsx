@@ -130,6 +130,15 @@ const DISTANCIA_MINIMA_TRILHA_METROS = 3;
 const DISTANCIA_MINIMA_DIRECAO_METROS = 2;
 const PRECISAO_MAXIMA_INICIAL_METROS = 120;
 const PRECISAO_MAXIMA_RASTREAMENTO_METROS = 80;
+const getEnvNumber = (key, fallback) => {
+    const value = Number.parseFloat(import.meta.env[key]);
+    return Number.isFinite(value) ? value : fallback;
+};
+const MAP_INITIAL_CENTER = [
+    getEnvNumber('VITE_MAP_CENTER_LAT', -26.485),
+    getEnvNumber('VITE_MAP_CENTER_LNG', -51.995)
+];
+const MAP_INITIAL_ZOOM = getEnvNumber('VITE_MAP_INITIAL_ZOOM', 14);
 
 // --- DEEP LINK HANDLER ---
 const DeepLinkHandler = () => {
@@ -164,7 +173,17 @@ const DeepLinkHandler = () => {
 
 // --- COMPONENTES DE UI ---
 
-const SeletorCamadas = ({ tipoMapa, setTipoMapa, showRefs, setShowRefs, showCondos, setShowCondos, mostrarDicas }) => {
+const SeletorCamadas = ({
+    tipoMapa,
+    setTipoMapa,
+    showRefs,
+    setShowRefs,
+    showCondos,
+    setShowCondos,
+    mostrarDicas,
+    hasReferencias,
+    hasCondominios
+}) => {
     const alternarCamada = () => {
         if (tipoMapa === 'google') setTipoMapa('satelite');
         else if (tipoMapa === 'satelite') setTipoMapa('padrao');
@@ -187,14 +206,18 @@ const SeletorCamadas = ({ tipoMapa, setTipoMapa, showRefs, setShowRefs, showCond
 
     return (
         <div className="absolute bottom-6 left-4 z-[400] flex flex-col gap-3">
-            <div className="relative">
-                <button onClick={() => setShowRefs(!showRefs)} className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showRefs ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400'}`} title="Mostrar/Ocultar Pontos de Referência">📍</button>
-                {mostrarDicas && <span className="control-hint left-side">Pontos de referência</span>}
-            </div>
-            <div className="relative">
-                <button onClick={() => setShowCondos(!showCondos)} className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showCondos ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-400'}`} title="Mostrar/Ocultar Condomínios">🏢</button>
-                {mostrarDicas && <span className="control-hint left-side">Condomínios</span>}
-            </div>
+            {hasReferencias && (
+                <div className="relative">
+                    <button onClick={() => setShowRefs(!showRefs)} className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showRefs ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400'}`} title="Mostrar/Ocultar Pontos de Referência">📍</button>
+                    {mostrarDicas && <span className="control-hint left-side">Pontos de referência</span>}
+                </div>
+            )}
+            {hasCondominios && (
+                <div className="relative">
+                    <button onClick={() => setShowCondos(!showCondos)} className={`w-12 h-12 rounded-lg bg-white shadow-lg flex items-center justify-center border-2 transition-all ${showCondos ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-400'}`} title="Mostrar/Ocultar Condomínios">🏢</button>
+                    {mostrarDicas && <span className="control-hint left-side">Condomínios</span>}
+                </div>
+            )}
             <div className="relative">
                 <button onClick={alternarCamada} className={`map-layer-btn ${classeBotao}`} title={tituloBotao} />
                 {mostrarDicas && <span className="control-hint left-side">Mudar mapa</span>}
@@ -846,6 +869,10 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
     const coords = dados.geometry.coordinates[0];
     const posicoes = coords.map(coord => [coord[1], coord[0]]);
     const centro = calcularCentroide(coords);
+    const labelPosition = dados.properties.labelPosition;
+    const posicaoLabel = labelPosition?.lat && labelPosition?.lng
+        ? [labelPosition.lat, labelPosition.lng]
+        : null;
     const baseRef = useMemo(() => getTerritorioBaseRef(db, idTerritorio), [idTerritorio]);
     const stateRef = useMemo(() => getTerritorioStateRef(db, idTerritorio, contextoId), [contextoId, idTerritorio]);
 
@@ -1108,6 +1135,39 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 
     if (!isAdmin && !isMeu) { opacidade = 0.2; opacidadeBorda = 0.4; }
     if (ocultarCores) { corPreenchimento = 'transparent'; opacidade = 0; pesoBorda = 5; opacidadeBorda = 0.8; }
+
+    const renderLabelTerritorio = () => (
+        <>
+            <span className="label-nome">{zoomLevel < 16 ? codigoTerritorio : nome}</span>
+            {zoomLevel < 16 && !isOcupado && !isFinalizado && !isAguardandoFinalizacao && (
+                <span className="label-tempo-compacto" title={dadosBanco.ultimaConclusao ? `Última conclusão: ${textoTempo} atrás` : 'Território ainda não trabalhado'}>
+                    {textoTempoCompacto}
+                </span>
+            )}
+            {zoomLevel >= 16 && podeVerDetalhes && (
+                <>
+                    {!isOcupado && !isFinalizado && !isAguardandoFinalizacao && (<><span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca"}</span><span className="label-tempo">{textoTempo}</span></>)}
+                    {isOcupado && (
+                        <span
+                            className="label-status"
+                            style={{
+                                color: '#fff',
+                                background: `linear-gradient(to right, #15803d ${pctInteira}%, #374151 ${pctInteira}%)`,
+                                fontSize: '12px',
+                                textShadow: 'none',
+                                border: '1px solid white'
+                            }}
+                            title={`${feitas} de ${total} quadras (${pctInteira}%)`}
+                        >
+                            {nomeResponsavelCurto}
+                        </span>
+                    )}
+                    {isAguardandoFinalizacao && <span className="label-status" style={{ color: '#854d0e', background: '#fef3c7' }}>Aguardando finalização</span>}
+                    {isFinalizado && <span className="label-status" style={{ color: '#166534', background: '#dcfce7' }}>Feito!</span>}
+                </>
+            )}
+        </>
+    );
 
     const gerarLinkMsg = (uNome, uWhats) => {
         const baseUrl = window.location.href.split('?')[0].split('#')[0] + '#/app';
@@ -1372,39 +1432,25 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
                     </div>
                 </Popup>
                 {/* TOOLTIP INTELIGENTE */}
-                {zoomLevel >= 14 && !ocultarCores && (
+                {zoomLevel >= 14 && !ocultarCores && !posicaoLabel && (
                     <Tooltip permanent direction="center" className="label-territorio">
-                        <span className="label-nome">{zoomLevel < 16 ? codigoTerritorio : nome}</span>
-                        {zoomLevel < 16 && !isOcupado && !isFinalizado && !isAguardandoFinalizacao && (
-                            <span className="label-tempo-compacto" title={dadosBanco.ultimaConclusao ? `Última conclusão: ${textoTempo} atrás` : 'Território ainda não trabalhado'}>
-                                {textoTempoCompacto}
-                            </span>
-                        )}
-                        {zoomLevel >= 16 && podeVerDetalhes && (
-                            <>
-                                {!isOcupado && !isFinalizado && !isAguardandoFinalizacao && (<><span className="label-status">{dadosBanco.ultimaConclusao ? "Trabalhado" : "Nunca"}</span><span className="label-tempo">{textoTempo}</span></>)}
-                                {isOcupado && (
-                                    <span
-                                        className="label-status"
-                                        style={{
-                                            color: '#fff',
-                                            background: `linear-gradient(to right, #15803d ${pctInteira}%, #374151 ${pctInteira}%)`,
-                                            fontSize: '12px',
-                                            textShadow: 'none',
-                                            border: '1px solid white'
-                                        }}
-                                        title={`${feitas} de ${total} quadras (${pctInteira}%)`}
-                                    >
-                                        {nomeResponsavelCurto}
-                                    </span>
-                                )}
-                                {isAguardandoFinalizacao && <span className="label-status" style={{ color: '#854d0e', background: '#fef3c7' }}>Aguardando finalização</span>}
-                                {isFinalizado && <span className="label-status" style={{ color: '#166534', background: '#dcfce7' }}>Feito!</span>}
-                            </>
-                        )}
+                        {renderLabelTerritorio()}
                     </Tooltip>
                 )}
             </Polygon>
+
+            {zoomLevel >= 14 && !ocultarCores && posicaoLabel && (
+                <CircleMarker
+                    center={posicaoLabel}
+                    radius={0}
+                    pathOptions={{ opacity: 0, fillOpacity: 0 }}
+                    interactive={false}
+                >
+                    <Tooltip permanent direction="center" className="label-territorio">
+                        {renderLabelTerritorio()}
+                    </Tooltip>
+                </CircleMarker>
+            )}
 
             {/* ITENS INTERNOS COM KEYS ÚNICAS COMPOSTAS (FIXED) */}
             {deveMostrarQuadras && listaQuadras.map((q, idx) => (
@@ -1462,7 +1508,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
 // --- MAPA PRINCIPAL ---
 const Mapa = ({ user, isAdmin, contextoSistema }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
-    const [zoomLevel, setZoomLevel] = useState(14);
+    const [zoomLevel, setZoomLevel] = useState(MAP_INITIAL_ZOOM);
     const [listaUsuarios, setListaUsuarios] = useState([]);
     const [posicaoUsuario, setPosicaoUsuario] = useState(null);
     const [trilhaUsuario, setTrilhaUsuario] = useState([]);
@@ -1473,6 +1519,20 @@ const Mapa = ({ user, isAdmin, contextoSistema }) => {
     const [showRefs, setShowRefs] = useState(false);
     const [showCondos, setShowCondos] = useState(true);
     const [mostrarDicasControles, setMostrarDicasControles] = useState(true);
+
+    const tiposPontosDisponiveis = useMemo(() => {
+        const todosPontos = geoJsonData?.features?.flatMap((feature) => feature.properties?.pontos || []) || [];
+        return {
+            hasReferencias: todosPontos.some((ponto) => ponto.tipo === 'referencia'),
+            hasCondominios: todosPontos.some((ponto) => ponto.tipo === 'condominio')
+        };
+    }, [geoJsonData]);
+
+    useEffect(() => {
+        if (!geoJsonData) return;
+        if (!tiposPontosDisponiveis.hasReferencias) setShowRefs(false);
+        if (!tiposPontosDisponiveis.hasCondominios) setShowCondos(false);
+    }, [geoJsonData, tiposPontosDisponiveis.hasCondominios, tiposPontosDisponiveis.hasReferencias]);
 
     useEffect(() => {
         loadMapaData()
@@ -1507,14 +1567,24 @@ const Mapa = ({ user, isAdmin, contextoSistema }) => {
             {!geoJsonData ? (
                 <div className="flex h-full items-center justify-center bg-gray-100"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>
             ) : (
-                <MapContainer center={[-26.485, -51.995]} zoom={14} maxZoom={22} zoomControl={false} className="h-full w-full z-0">
+                <MapContainer center={MAP_INITIAL_CENTER} zoom={MAP_INITIAL_ZOOM} maxZoom={22} zoomControl={false} className="h-full w-full z-0">
                     <MapEvents />
                     <DeepLinkHandler />
                     {tipoMapa === 'padrao' && <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxNativeZoom={19} maxZoom={22} />}
                     {tipoMapa === 'google' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
                     {tipoMapa === 'satelite' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
 
-                    <SeletorCamadas tipoMapa={tipoMapa} setTipoMapa={setTipoMapa} showRefs={showRefs} setShowRefs={setShowRefs} showCondos={showCondos} setShowCondos={setShowCondos} mostrarDicas={mostrarDicasControles} />
+                    <SeletorCamadas
+                        tipoMapa={tipoMapa}
+                        setTipoMapa={setTipoMapa}
+                        showRefs={showRefs}
+                        setShowRefs={setShowRefs}
+                        showCondos={showCondos}
+                        setShowCondos={setShowCondos}
+                        mostrarDicas={mostrarDicasControles}
+                        hasReferencias={tiposPontosDisponiveis.hasReferencias}
+                        hasCondominios={tiposPontosDisponiveis.hasCondominios}
+                    />
                     <ControleVisibilidade ocultarCores={ocultarCores} setOcultarCores={setOcultarCores} mostrarDicas={mostrarDicasControles} />
                     <ControlesNavegacao
                         rastreandoLocalizacao={rastreandoLocalizacao}

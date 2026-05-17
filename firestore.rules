@@ -114,6 +114,7 @@ service cloud.firestore {
                'texto',
                'data',
                'lida',
+               'lidaPor',
                'tipo',
                'origem',
                'tituloPush'
@@ -123,12 +124,28 @@ service cloud.firestore {
              request.resource.data.texto.size() <= 2000;
     }
 
+    function atualizaLeituraNotificacao() {
+      return estaLogado() &&
+             camposAlteradosApenas(['lida']) &&
+             resource.data.para == meuEmail() &&
+             request.resource.data.lida is bool;
+    }
+
+    function atualizaLeituraNotificacaoAdmin() {
+      return isAdmin() &&
+             camposAlteradosApenas(['lidaPor']) &&
+             resource.data.para == 'ADMINS' &&
+             request.resource.data.lidaPor is list;
+    }
+
     match /usuarios/{email} {
       allow read: if estaLogado() && (isAdmin() || meuEmail() == email);
 
-      allow create: if estaLogado() &&
-                    meuEmail() == email &&
-                    request.resource.data.role == 'aguardando';
+      allow create: if isAdmin() || (
+        estaLogado() &&
+        meuEmail() == email &&
+        request.resource.data.role == 'aguardando'
+      );
 
       allow update: if isAdmin() || (
         estaLogado() &&
@@ -173,12 +190,14 @@ service cloud.firestore {
       allow create: if isAdmin() || (
         estaLogado() &&
         notificacaoValida() &&
-        (request.resource.data.para == 'ADMINS' || request.resource.data.para == meuEmail())
+        request.resource.data.para == meuEmail()
       );
 
+      allow update: if atualizaLeituraNotificacao() ||
+                    atualizaLeituraNotificacaoAdmin();
+
       allow delete: if estaLogado() && (
-        resource.data.para == meuEmail() ||
-        (resource.data.para == 'ADMINS' && isAdmin())
+        resource.data.para == meuEmail()
       );
     }
   }

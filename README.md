@@ -124,29 +124,124 @@ Baixe o arquivo `google-services.json` do projeto Firebase Android com o pacote 
 
 Esse arquivo fica apenas no ambiente local e não deve ser versionado no Git.
 
+Para mais de uma congregação, guarde um arquivo por instância:
+
+```text
+android/app/google-services.palmas.json
+android/app/google-services.general.json
+```
+
+O script também aceita nomes com hífen, como `android/app/google-services-general.json`.
+
+O arquivo ativo continua sendo `android/app/google-services.json`, mas ele é gerado localmente a partir da instância escolhida:
+
+```bash
+npm run android:firebase:palmas
+npm run android:firebase:general
+```
+
+Os scripts de build Android por congregação já fazem essa troca antes de sincronizar o Capacitor.
+
+O `applicationId` do APK/AAB é lido automaticamente do `package_name` do `google-services` selecionado. Assim, se uma congregação usar `br.com.territoriospalmas.app` e outra usar `br.com.territoriosgeneral.app`, os dois apps podem coexistir no mesmo aparelho.
+
 ## Scripts
 
 ```bash
 npm run dev
+npm run dev:palmas
+npm run dev:general
 npm run lint
 npm run build
+npm run build:palmas
+npm run build:general
 npm run deploy
+npm run deploy:palmas
+npm run deploy:general
+npm run android:debug:palmas
+npm run android:debug:general
+npm run android:release:palmas
+npm run android:release:general
 ```
 
 Observação: `npm run build` atualiza automaticamente os arquivos de versão antes da build.
+
+`npm run dev` e `npm run deploy` perguntam qual instância usar antes de continuar. Para automações ou quando já souber a congregação, use o script explícito, como `npm run dev:palmas`, `npm run dev:general`, `npm run deploy:palmas` ou `npm run deploy:general`.
+
+Por padrão, `npm run build` ainda usa a instância `palmas`.
+
+## Instâncias por Congregação
+
+O projeto usa o mesmo código para mais de uma congregação, mas cada instância deve ter seu próprio projeto Firebase e seu próprio arquivo de ambiente local.
+
+Arquivos locais esperados:
+
+```text
+.env.palmas
+.env.general
+```
+
+Esses arquivos não devem ser enviados ao Git. O Vite usa o arquivo correto conforme o modo:
+
+```bash
+npm run build:palmas
+npm run build:general
+```
+
+O Firebase Hosting usa o target `app` em [firebase.json](./firebase.json), e o target aponta para um site diferente em cada projeto dentro de [.firebaserc](./.firebaserc).
+
+Cada arquivo de ambiente também deve definir `VITE_LIVE_UPDATE_MANIFEST_URL` apontando para o Hosting da própria congregação. Se essa variável ficar vazia, o live update nativo fica desativado para evitar baixar pacote de outra instância.
+
+Cada instância também pode apontar para um mapa próprio com `VITE_MAPA_URL`. Para o General, use `./mapa.general.json`; enquanto o mapa real não estiver pronto, esse arquivo pode ser uma `FeatureCollection` vazia.
+
+### Notificações
+
+As notificações internas usam a coleção `notificacoes` dentro do Firebase da instância ativa. O sininho mostra essas mensagens e também exibe um aviso in-app quando uma nova notificação chega com o app aberto.
+
+O push pelo OneSignal também é separado por instância:
+
+- `VITE_ONESIGNAL_APP_ID` fica em `.env.palmas` ou `.env.general` para inicializar o SDK no app correto.
+- O Worker de cada instância precisa dos secrets `ONESIGNAL_APP_ID` e `ONESIGNAL_REST_API_KEY`.
+- O app registra tags no OneSignal com `instancia` e `firebaseProjectId`, facilitando conferir no painel se o dispositivo está no ambiente correto.
+
+Para conferir os secrets do Worker do General:
+
+```bash
+cd workers/notifications-relay
+wrangler secret list --config wrangler.general.toml
+```
+
+Para inicializar o Firestore de uma instância nova:
+
+```bash
+npm run firestore:bootstrap:general
+```
+
+Para definir o primeiro admin:
+
+```bash
+npm run firestore:bootstrap:general -- --admin-email email@gmail.com --admin-name "Nome"
+```
+
+Quando o mapa real da instância estiver pronto, é possível criar os documentos base dos territórios:
+
+```bash
+npm run firestore:bootstrap:general -- --map ./public/mapa.general.json --seed-territories
+```
 
 ## Deploy
 
 Publicar aplicação:
 
 ```bash
-npm run deploy
+npm run deploy:palmas
+npm run deploy:general
 ```
 
 Publicar apenas as rules do Firestore:
 
 ```bash
-firebase deploy --only firestore:rules
+npm run deploy:rules:palmas
+npm run deploy:rules:general
 ```
 
 Se o deploy das rules falhar com permissão `serviceusage.services.use`, ajuste o IAM da conta usada no Firebase CLI no projeto Google Cloud.
@@ -179,6 +274,28 @@ npm run dev -- --host
 O arquivo `public/mapa.json` é a base do mapa consumido pelo app.
 
 Também existe um fluxo auxiliar em `kmz/` para conversão de arquivos de origem para o formato usado pelo sistema.
+
+Para Palmas, o conversor antigo fica em `kmz/conversor.py`.
+
+Para General Carneiro, coloque os KMZs em `kmz/general/` e rode:
+
+```bash
+python kmz/conversor_general.py kmz/general
+```
+
+O conversor de General gera `public/mapa.general.json`. Ele usa `Shapely`, entao o ambiente Python precisa ter a dependencia instalada:
+
+```bash
+python -m pip install shapely
+```
+
+Veja o passo a passo completo em [kmz/README.md](./kmz/README.md).
+
+Importante: `npm run deploy:general` nao roda o bootstrap do Firestore. Se for necessario criar os documentos base da colecao `territorios` a partir do mapa, rode separadamente:
+
+```bash
+npm run firestore:bootstrap:general -- --map ./public/mapa.general.json --seed-territories
+```
 
 ## Observações de Produto
 

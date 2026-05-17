@@ -3,7 +3,11 @@
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy",
+    "deploy:palmas": "wrangler deploy --config wrangler.palmas.toml",
+    "deploy:general": "wrangler deploy --config wrangler.general.toml",
     "dev": "wrangler dev",
+    "dev:palmas": "wrangler dev --config wrangler.palmas.toml",
+    "dev:general": "wrangler dev --config wrangler.general.toml",
     "tail": "wrangler tail"
   },
   "devDependencies": {

@@ -6,9 +6,22 @@ import { db } from './firebase';
 
 const CANAL_PADRAO_ID = 'territorios-alertas';
 const ONESIGNAL_APP_ID = import.meta.env.VITE_ONESIGNAL_APP_ID || '';
+const APP_INSTANCE = import.meta.env.MODE || 'local';
+const FIREBASE_PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || '';
+const APP_SHORT_NAME = import.meta.env.VITE_APP_SHORT_NAME || 'Territórios';
 const ONESIGNAL_WEB_SDK_URL = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js';
 const ONESIGNAL_WEB_WORKER_PATH = 'push/onesignal/OneSignalSDKWorker.js';
 const ONESIGNAL_WEB_WORKER_SCOPE = '/push/onesignal/';
+const ONESIGNAL_PROMPT_TEXT = {
+    actionMessage: `Receber comunicados e avisos do ${APP_SHORT_NAME}?`,
+    acceptButton: 'Permitir',
+    cancelButton: 'Agora nao'
+};
+const ONESIGNAL_WELCOME_NOTIFICATION = {
+    title: APP_SHORT_NAME,
+    message: 'Notificações ativadas. Voce receberá comunicados e avisos por aqui.',
+    url: '/'
+};
 let listenersRegistrados = false;
 let oneSignalNativoInicializado = false;
 let oneSignalWebInicializado = false;
@@ -49,6 +62,14 @@ const getDadosNotificacao = (notification) =>
     || notification?.data
     || {};
 
+const getOneSignalTags = (email, plataforma) => ({
+    email,
+    plataforma,
+    instancia: APP_INSTANCE,
+    firebaseProjectId: FIREBASE_PROJECT_ID,
+    app: APP_SHORT_NAME
+});
+
 const getRefUsuario = (email) => doc(db, 'usuarios', email.toLowerCase());
 
 const persistirTokenUsuario = async (email, token) => {
@@ -73,6 +94,63 @@ const removerTokenUsuario = async (email, token) => {
         ultimoFcmTokenAtualizadoEm: deleteField(),
         plataformaPush: deleteField()
     }, { merge: true });
+};
+
+const registrarFcmNativo = async (user) => {
+    if (!ehAndroidNativo()) return;
+
+    emailUsuarioAtual = user.email.toLowerCase();
+
+    await garantirListenersPush();
+
+    let permissao = await PushNotifications.checkPermissions();
+    if (permissao.receive === 'prompt') {
+        permissao = await PushNotifications.requestPermissions();
+    }
+
+    if (permissao.receive !== 'granted') {
+        throw new Error('Permissão de notificações não concedida no Android.');
+    }
+
+    await PushNotifications.createChannel({
+        id: CANAL_PADRAO_ID,
+        name: 'Alertas do Territórios',
+        description: 'Comunicados e avisos do sistema',
+        importance: 4,
+        visibility: 1,
+        sound: 'default'
+    });
+
+    await PushNotifications.register();
+};
+
+const registrarFcmFallbackNativo = async (user) => {
+    try {
+        await registrarFcmNativo(user);
+    } catch (error) {
+        console.warn('Nao foi possivel registrar o fallback FCM no Android:', error);
+    }
+};
+
+const desregistrarFcmNativo = async (email) => {
+    if (!ehAndroidNativo()) return;
+
+    const emailNormalizado = email?.toLowerCase() || emailUsuarioAtual;
+    const tokenParaRemover = ultimoTokenRegistrado;
+
+    try {
+        await PushNotifications.unregister();
+    } catch (error) {
+        console.warn('Nao foi possivel desregistrar o FCM do aparelho:', error);
+    }
+
+    try {
+        await removerTokenUsuario(emailNormalizado, tokenParaRemover);
+    } catch (error) {
+        console.warn('Nao foi possivel remover o token FCM do Firestore:', error);
+    }
+
+    ultimoTokenRegistrado = null;
 };
 
 const garantirListenersPush = async () => {
@@ -164,11 +242,42 @@ const garantirOneSignalWeb = async () => {
         serviceWorkerPath: ONESIGNAL_WEB_WORKER_PATH,
         serviceWorkerParam: {
             scope: ONESIGNAL_WEB_WORKER_SCOPE
-        }
+        },
+        promptOptions: {
+            slidedown: {
+                prompts: [{
+                    type: 'push',
+                    autoPrompt: false,
+                    text: ONESIGNAL_PROMPT_TEXT
+                }]
+            }
+        },
+        welcomeNotification: ONESIGNAL_WELCOME_NOTIFICATION
     });
 
     oneSignalWebInicializado = true;
     return OneSignal;
+};
+
+const solicitarPermissaoOneSignalWeb = async (OneSignal) => {
+    if (OneSignal.Notifications?.permission === true) return;
+
+    if (OneSignal.Slidedown?.promptPush) {
+        await OneSignal.Slidedown.promptPush();
+
+        if (OneSignal.Notifications?.permission !== true) {
+            throw new Error('Permissão de notificações não concedida no navegador.');
+        }
+
+        return;
+    }
+
+    if (OneSignal.Notifications?.requestPermission) {
+        const aceitou = await OneSignal.Notifications.requestPermission();
+        if (!aceitou) {
+            throw new Error('Permissão de notificações não concedida no navegador.');
+        }
+    }
 };
 
 const ativarOneSignalNativo = async (user) => {
@@ -182,10 +291,7 @@ const ativarOneSignalNativo = async (user) => {
     }
 
     if (NativeOneSignal.User?.addTags) {
-        await NativeOneSignal.User.addTags({
-            email: emailUsuarioAtual,
-            plataforma: 'android'
-        });
+        await NativeOneSignal.User.addTags(getOneSignalTags(emailUsuarioAtual, 'android'));
     }
 
     if (NativeOneSignal.Notifications?.requestPermission) {
@@ -217,7 +323,7 @@ const ativarOneSignalNativo = async (user) => {
             optedIn
         });
     } catch (error) {
-        console.warn('Nao foi possivel ler o status OneSignal Android:', error);
+        console.warn('Nao foi possível ler o status OneSignal Android:', error);
     }
 };
 
@@ -232,18 +338,10 @@ const ativarOneSignalWeb = async (user) => {
     }
 
     if (OneSignal.User?.addTags) {
-        await OneSignal.User.addTags({
-            email: emailUsuarioAtual,
-            plataforma: 'web'
-        });
+        await OneSignal.User.addTags(getOneSignalTags(emailUsuarioAtual, 'web'));
     }
 
-    if (OneSignal.Notifications?.permission !== true && OneSignal.Notifications?.requestPermission) {
-        const aceitou = await OneSignal.Notifications.requestPermission();
-        if (!aceitou) {
-            throw new Error('Permissão de notificações não concedida no navegador.');
-        }
-    }
+    await solicitarPermissaoOneSignalWeb(OneSignal);
 };
 
 export const ativarPushNotifications = async (user) => {
@@ -251,6 +349,7 @@ export const ativarPushNotifications = async (user) => {
 
     if (oneSignalNativoDisponivel()) {
         await ativarOneSignalNativo(user);
+        await registrarFcmFallbackNativo(user);
         return;
     }
 
@@ -261,29 +360,7 @@ export const ativarPushNotifications = async (user) => {
 
     if (!ehAndroidNativo()) return;
 
-    emailUsuarioAtual = user.email.toLowerCase();
-
-    await garantirListenersPush();
-
-    let permissao = await PushNotifications.checkPermissions();
-    if (permissao.receive === 'prompt') {
-        permissao = await PushNotifications.requestPermissions();
-    }
-
-    if (permissao.receive !== 'granted') {
-        throw new Error('Permissão de notificações não concedida no Android.');
-    }
-
-    await PushNotifications.createChannel({
-        id: CANAL_PADRAO_ID,
-        name: 'Alertas do Territórios',
-        description: 'Comunicados e avisos do sistema',
-        importance: 4,
-        visibility: 1,
-        sound: 'default'
-    });
-
-    await PushNotifications.register();
+    await registrarFcmNativo(user);
 };
 
 export const desativarPushNotifications = async (email) => {
@@ -293,9 +370,10 @@ export const desativarPushNotifications = async (email) => {
                 NativeOneSignal.logout();
             }
         } catch (error) {
-            console.warn('Nao foi possivel encerrar a sessao OneSignal:', error);
+            console.warn('Não foi possível encerrar a sessão OneSignal:', error);
         }
 
+        await desregistrarFcmNativo(email);
         emailUsuarioAtual = null;
         return;
     }
@@ -307,7 +385,7 @@ export const desativarPushNotifications = async (email) => {
                 await OneSignal.logout();
             }
         } catch (error) {
-            console.warn('Nao foi possivel encerrar a sessao OneSignal Web:', error);
+            console.warn('Não foi possível encerrar a sessão OneSignal Web:', error);
         }
 
         emailUsuarioAtual = null;
@@ -316,21 +394,6 @@ export const desativarPushNotifications = async (email) => {
 
     if (!ehAndroidNativo()) return;
 
-    const emailNormalizado = email?.toLowerCase() || emailUsuarioAtual;
-    const tokenParaRemover = ultimoTokenRegistrado;
-
-    try {
-        await PushNotifications.unregister();
-    } catch (error) {
-        console.warn('Nao foi possivel desregistrar o FCM do aparelho:', error);
-    }
-
-    try {
-        await removerTokenUsuario(emailNormalizado, tokenParaRemover);
-    } catch (error) {
-        console.warn('Nao foi possivel remover o token FCM do Firestore:', error);
-    }
-
+    await desregistrarFcmNativo(email);
     emailUsuarioAtual = null;
-    ultimoTokenRegistrado = null;
 };

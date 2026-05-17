@@ -4,7 +4,40 @@ const { execFileSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
 const apkPath = path.join(projectRoot, 'territorios-palmas-debug.apk');
-const appId = 'br.com.territoriospalmas.app';
+const instancePropertiesPath = path.join(projectRoot, 'android', 'app', 'territorios-instance.properties');
+const googleServicesPath = path.join(projectRoot, 'android', 'app', 'google-services.json');
+
+function readProperties(filePath) {
+  const props = {};
+  if (!existsSync(filePath)) return props;
+
+  for (const line of readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex === -1) continue;
+
+    props[trimmed.slice(0, separatorIndex).trim()] = trimmed.slice(separatorIndex + 1).trim();
+  }
+
+  return props;
+}
+
+function getActiveAppId() {
+  const instanceProps = readProperties(instancePropertiesPath);
+  if (instanceProps.applicationId) return instanceProps.applicationId;
+
+  if (existsSync(googleServicesPath)) {
+    const googleServices = JSON.parse(readFileSync(googleServicesPath, 'utf8'));
+    const packageName = googleServices.client?.[0]?.client_info?.android_client_info?.package_name;
+    if (packageName) return packageName;
+  }
+
+  return 'br.com.territoriospalmas.app';
+}
+
+const appId = getActiveAppId();
 
 const sdkRoots = [
   process.env.ANDROID_HOME,

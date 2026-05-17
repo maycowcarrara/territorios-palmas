@@ -8,6 +8,16 @@ if (hasReleaseKeystore) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
+def instancePropertiesFile = file("territorios-instance.properties")
+def instanceProperties = new Properties()
+
+if (instancePropertiesFile.exists()) {
+    instanceProperties.load(new FileInputStream(instancePropertiesFile))
+}
+
+def activeApplicationId = instanceProperties['applicationId'] ?: 'br.com.territoriospalmas.app'
+def activeAppName = instanceProperties['appName'] ?: 'Territórios Palmas'
+
 android {
     namespace "br.com.territoriospalmas.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -28,12 +38,15 @@ android {
         }
     }
     defaultConfig {
-        applicationId "br.com.territoriospalmas.app"
+        applicationId activeApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 208
         versionName "2.2.208"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders = [
+            appLabel: activeAppName
+        ]
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
