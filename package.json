@@ -1,7 +1,7 @@
 {
   "name": "territorios-palmas",
   "private": true,
-  "version": "2.2.230",
+  "version": "2.2.233",
   "type": "module",
   "scripts": {
     "dev": "node scripts/select-npm-instance.cjs dev",

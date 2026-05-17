@@ -163,6 +163,11 @@ npm run android:release:palmas
 npm run android:release:general
 ```
 
+Os artefatos Android sao salvos com o nome da instancia ativa. Exemplos:
+`territorios-palmas-debug.apk`, `territorios-general-debug.apk`,
+`android-release/territorios-palmas-release.apk` e
+`android-release/territorios-general-release.aab`.
+
 Observação: `npm run build` atualiza automaticamente os arquivos de versão antes da build.
 
 `npm run dev` e `npm run deploy` perguntam qual instância usar antes de continuar. Para automações ou quando já souber a congregação, use o script explícito, como `npm run dev:palmas`, `npm run dev:general`, `npm run deploy:palmas` ou `npm run deploy:general`.

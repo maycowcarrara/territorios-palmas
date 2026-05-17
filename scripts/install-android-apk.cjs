@@ -3,7 +3,6 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
-const apkPath = path.join(projectRoot, 'territorios-palmas-debug.apk');
 const instancePropertiesPath = path.join(projectRoot, 'android', 'app', 'territorios-instance.properties');
 const googleServicesPath = path.join(projectRoot, 'android', 'app', 'google-services.json');
 
@@ -37,7 +36,14 @@ function getActiveAppId() {
   return 'br.com.territoriospalmas.app';
 }
 
+function getActiveInstance() {
+  const instance = readProperties(instancePropertiesPath).instance || 'palmas';
+  return instance.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'palmas';
+}
+
 const appId = getActiveAppId();
+const apkPath = path.join(projectRoot, `territorios-${getActiveInstance()}-debug.apk`);
+const legacyApkPath = path.join(projectRoot, 'territorios-palmas-debug.apk');
 
 const sdkRoots = [
   process.env.ANDROID_HOME,
@@ -93,7 +99,10 @@ function getConnectedDevices() {
 function ensureApkExists() {
   if (!existsSync(apkPath)) {
     console.error(`APK nao encontrada em: ${apkPath}`);
-    console.error('Rode primeiro: npm run android:debug');
+    if (apkPath !== legacyApkPath && existsSync(legacyApkPath)) {
+      console.error(`Existe uma APK antiga em: ${legacyApkPath}`);
+    }
+    console.error(`Rode primeiro: npm run android:debug:${getActiveInstance()}`);
     process.exit(1);
   }
 }

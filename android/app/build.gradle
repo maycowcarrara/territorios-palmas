@@ -41,8 +41,8 @@ android {
         applicationId activeApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 208
-        versionName "2.2.208"
+        versionCode 231
+        versionName "2.2.231"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders = [
             appLabel: activeAppName

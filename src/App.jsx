@@ -131,6 +131,11 @@ function Login() {
     <div className="flex items-center justify-center h-[100dvh] bg-gray-100">
       <div className="w-96 bg-white shadow-xl rounded-xl overflow-hidden border border-gray-200 m-4 animate-fade-in">
         <div className="p-8 text-center">
+          <img
+            src={APP_ICON_192}
+            alt={`Logo ${APP_SHORT_NAME}`}
+            className="mx-auto mb-4 h-20 w-20 rounded-2xl shadow-sm"
+          />
           <h2 className="text-3xl font-bold text-blue-600 mb-2">{APP_SHORT_NAME}</h2>
           <p className="text-gray-500 mb-8">{APP_SUBTITLE || APP_TITLE}</p>
           <div className="flex flex-col gap-4">
@@ -1247,13 +1252,12 @@ function Dashboard() {
       {/* CABEÇALHO */}
       <div className={`app-safe-header min-h-16 ${temaSistema.headerBg} text-white shadow-md z-20 px-2.5 sm:px-4 flex items-center justify-between flex-shrink-0`}>
         
-        {/* LADO ESQUERDO: LOGO (Mobile) vs TÍTULO (Desktop) */}
+        {/* LADO ESQUERDO: LOGO E TÍTULO */}
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-          {/* Logo: Visível no mobile (sm:hidden esconde em telas maiores) */}
           <img 
             src={APP_ICON_192} 
             alt="Logo" 
-            className={`h-9 w-9 rounded-lg shadow-sm ${temaSistema.headerBorder} border sm:hidden`} 
+            className={`h-9 w-9 rounded-lg shadow-sm ${temaSistema.headerBorder} border`} 
           />
           <div className="min-w-0 flex-1">
             <span className="text-xl font-bold tracking-wide hidden sm:block">Territórios</span>
