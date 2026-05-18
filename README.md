@@ -168,6 +168,9 @@ Os artefatos Android sao salvos com o nome da instancia ativa. Exemplos:
 `android-release/territorios-palmas-release.apk` e
 `android-release/territorios-general-release.aab`.
 
+O `npm run android:sync` tambem sincroniza a config nativa do Capacitor,
+icones e splash com a instancia ativa selecionada pelo `android:firebase:*`.
+
 Observação: `npm run build` atualiza automaticamente os arquivos de versão antes da build.
 
 `npm run dev` e `npm run deploy` perguntam qual instância usar antes de continuar. Para automações ou quando já souber a congregação, use o script explícito, como `npm run dev:palmas`, `npm run dev:general`, `npm run deploy:palmas` ou `npm run deploy:general`.
@@ -247,6 +250,25 @@ Publicar apenas as rules do Firestore:
 ```bash
 npm run deploy:rules:palmas
 npm run deploy:rules:general
+```
+
+Antes de qualquer deploy Firebase, os scripts rodam uma trava com `firebase projects:list --json` e bloqueiam se a conta ativa nao tiver acesso ao projeto esperado em `.firebaserc`.
+
+Antes de qualquer deploy do Worker, os scripts rodam uma trava com `npx wrangler whoami` e bloqueiam se o `account_id` esperado nao aparecer na conta Cloudflare ativa. O General ja tem `account_id` em `workers/notifications-relay/wrangler.general.toml`. Para Palmas, preencha o `account_id` em `workers/notifications-relay/wrangler.palmas.toml` depois de entrar na conta Cloudflare correta:
+
+```bash
+cd workers/notifications-relay
+npx wrangler whoami
+```
+
+Se a trava acusar conta errada, troque a sessao antes de publicar:
+
+```bash
+firebase logout
+firebase login
+
+npx wrangler logout
+npx wrangler login
 ```
 
 Se o deploy das rules falhar com permissão `serviceusage.services.use`, ajuste o IAM da conta usada no Firebase CLI no projeto Google Cloud.

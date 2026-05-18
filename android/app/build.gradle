@@ -41,9 +41,13 @@ android {
         applicationId activeApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 231
-        versionName "2.2.231"
+        versionCode 236
+        versionName "2.2.236"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        resValue "string", "app_name", activeAppName
+        resValue "string", "title_activity_main", activeAppName
+        resValue "string", "package_name", activeApplicationId
+        resValue "string", "custom_url_scheme", activeApplicationId
         manifestPlaceholders = [
             appLabel: activeAppName
         ]
