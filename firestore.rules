@@ -41,6 +41,7 @@ service cloud.firestore {
         'designadoPara',
         'designadoNome',
         'dataDesignacao',
+        'designacaoId',
         'cicloAtual',
         'nome'
       ];
@@ -56,6 +57,7 @@ service cloud.firestore {
         'designadoPara',
         'designadoNome',
         'dataDesignacao',
+        'designacaoId',
         'cicloAtual',
         'nome',
         'territorioBaseId',
@@ -70,13 +72,58 @@ service cloud.firestore {
       return ['nome', 'notas_quadras', 'ultimaAlteracao'];
     }
 
+    function camposNotaDocumento() {
+      return [
+        'quadraId',
+        'texto',
+        'autorEmail',
+        'autorNome',
+        'data',
+        'editadoEm',
+        'designacaoId',
+        'territorioId',
+        'contextoId'
+      ];
+    }
+
+    function docIdTerritorioContexto(contextoId, territorioBaseId) {
+      return contextoId + '__' + territorioBaseId;
+    }
+
+    function existeEstadoTerritorioNoContexto(territorioBaseId, contextoId) {
+      return contextoId == 'normal'
+        ? exists(/databases/$(database)/documents/territorios/$(territorioBaseId))
+        : exists(/databases/$(database)/documents/territorios_contexto/$(docIdTerritorioContexto(contextoId, territorioBaseId)));
+    }
+
+    function getEstadoTerritorioNoContexto(territorioBaseId, contextoId) {
+      return contextoId == 'normal'
+        ? get(/databases/$(database)/documents/territorios/$(territorioBaseId)).data
+        : get(/databases/$(database)/documents/territorios_contexto/$(docIdTerritorioContexto(contextoId, territorioBaseId))).data;
+    }
+
+    function notaDocumentoValida() {
+      return request.resource.data.keys().hasOnly(camposNotaDocumento()) &&
+             request.resource.data.quadraId is string &&
+             request.resource.data.texto is string &&
+             request.resource.data.texto.size() <= 4000 &&
+             request.resource.data.autorEmail is string &&
+             request.resource.data.autorNome is string &&
+             (request.resource.data.designacaoId == null || request.resource.data.designacaoId is string) &&
+             request.resource.data.contextoId is string;
+    }
+
     function mantemOuLimpaDesignacaoPropria() {
-      return request.resource.data.designadoPara == resource.data.designadoPara ||
+      return (
+               request.resource.data.designadoPara == resource.data.designadoPara &&
+               request.resource.data.designacaoId == resource.data.designacaoId
+             ) ||
              (
                resource.data.designadoPara == meuEmail() &&
                request.resource.data.designadoPara == null &&
                request.resource.data.designadoNome == null &&
                request.resource.data.dataDesignacao == null &&
+               request.resource.data.designacaoId == null &&
                request.resource.data.cicloAtual == null
              );
     }
@@ -95,7 +142,7 @@ service cloud.firestore {
     }
 
     function podeAtualizarNotasTerritorio() {
-      return isAprovado() &&
+      return isAdmin() &&
              camposAlteradosApenas(camposNotasTerritorio()) &&
              mantemNomeSalvo();
     }
@@ -106,6 +153,35 @@ service cloud.firestore {
              camposAlteradosApenas(camposOperacionaisContexto()) &&
              mantemOuLimpaDesignacaoPropria() &&
              mantemNomeSalvo();
+    }
+
+    function podeCriarNotaTerritorio(territorioBaseId) {
+      return isAprovado() &&
+             notaDocumentoValida() &&
+             request.resource.data.autorEmail == meuEmail() &&
+             existeEstadoTerritorioNoContexto(territorioBaseId, request.resource.data.contextoId) &&
+             getEstadoTerritorioNoContexto(territorioBaseId, request.resource.data.contextoId).designadoPara == meuEmail() &&
+             getEstadoTerritorioNoContexto(territorioBaseId, request.resource.data.contextoId).designacaoId == request.resource.data.designacaoId;
+    }
+
+    function podeAtualizarNotaTerritorio(territorioBaseId) {
+      return isAprovado() &&
+             notaDocumentoValida() &&
+             resource.data.autorEmail == meuEmail() &&
+             request.resource.data.autorEmail == resource.data.autorEmail &&
+             request.resource.data.contextoId == resource.data.contextoId &&
+             request.resource.data.designacaoId == resource.data.designacaoId &&
+             existeEstadoTerritorioNoContexto(territorioBaseId, resource.data.contextoId) &&
+             getEstadoTerritorioNoContexto(territorioBaseId, resource.data.contextoId).designadoPara == meuEmail() &&
+             getEstadoTerritorioNoContexto(territorioBaseId, resource.data.contextoId).designacaoId == resource.data.designacaoId;
+    }
+
+    function podeExcluirNotaTerritorio(territorioBaseId) {
+      return isAprovado() &&
+             resource.data.autorEmail == meuEmail() &&
+             existeEstadoTerritorioNoContexto(territorioBaseId, resource.data.contextoId) &&
+             getEstadoTerritorioNoContexto(territorioBaseId, resource.data.contextoId).designadoPara == meuEmail() &&
+             getEstadoTerritorioNoContexto(territorioBaseId, resource.data.contextoId).designacaoId == resource.data.designacaoId;
     }
 
     function notificacaoValida() {
@@ -162,6 +238,13 @@ service cloud.firestore {
                     podeAtualizarTerritorioDesignado() ||
                     podeAtualizarNotasTerritorio();
       allow create, delete: if isAdmin();
+
+      match /notas/{notaId} {
+        allow read: if isAprovado();
+        allow create: if isAdmin() || podeCriarNotaTerritorio(territorio);
+        allow update: if isAdmin() || podeAtualizarNotaTerritorio(territorio);
+        allow delete: if isAdmin() || podeExcluirNotaTerritorio(territorio);
+      }
     }
 
     match /territorios_contexto/{territorioContexto} {

@@ -7,8 +7,13 @@ import { getDefaultSistemaConfig, getSistemaTheme, slugifyCampanha } from './sis
 import { getTerritorioContextCollectionRef } from './territorioContext';
 import { useUiFeedback } from './uiFeedback';
 import { enviarComunicadoPeloRelay, relayDisponivel } from './notificationRelay';
+import { useOnlineStatus } from './useOnlineStatus';
+
+const ADMIN_OFFLINE_MESSAGE = 'Você está offline. Ações administrativas precisam de conexão para evitar conflito de designações. Conecte-se para continuar.';
+const ADMIN_OFFLINE_ACTION_CLASS = 'disabled:cursor-not-allowed disabled:opacity-50';
 
 const AdminPanel = () => {
+    const isOnline = useOnlineStatus();
     const [usuarios, setUsuarios] = useState([]);
     const [campanhas, setCampanhas] = useState([]);
     const [campanhaTitulo, setCampanhaTitulo] = useState('');
@@ -22,6 +27,19 @@ const AdminPanel = () => {
     const { config: contextoSistema } = useSistema();
     const temaSistema = getSistemaTheme(contextoSistema);
     const { notify, confirm } = useUiFeedback();
+    const adminActionsDisabled = !isOnline;
+
+    const ensureOnlineAdminAction = () => {
+        if (isOnline) return true;
+
+        notify({
+            title: 'Administração bloqueada offline',
+            message: ADMIN_OFFLINE_MESSAGE,
+            variant: 'warning',
+            durationMs: 7000
+        });
+        return false;
+    };
 
     // Estados para NOVO usuário
     const [novoEmail, setNovoEmail] = useState('');
@@ -120,6 +138,7 @@ const AdminPanel = () => {
     // --- ADICIONAR NOVO ---
     const handleAdicionar = async (e) => {
         e.preventDefault();
+        if (!ensureOnlineAdminAction()) return;
         if (!novoEmail) return;
 
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -182,6 +201,7 @@ const AdminPanel = () => {
 
     // --- AÇÕES RÁPIDAS (ATUALIZADO COM CONFIRMAÇÃO) ---
     const mudarRole = async (user, novaRole) => {
+        if (!ensureOnlineAdminAction()) return;
         const nomeUsuario = user.nome || user.id;
         const aprovandoUsuario = user.role === 'aguardando' && novaRole === 'comum';
         const promovendoAdmin = novaRole === 'admin';
@@ -213,6 +233,7 @@ const AdminPanel = () => {
     };
 
     const remover = async (email) => {
+        if (!ensureOnlineAdminAction()) return;
         if (!(await confirm({
             title: 'Excluir usuário',
             message: `Tem certeza que deseja excluir definitivamente o usuário ${email}?\n\nEssa ação não pode ser desfeita.`,
@@ -246,6 +267,7 @@ const AdminPanel = () => {
 
     const salvarEdicao = async () => {
         if (!editandoId) return;
+        if (!ensureOnlineAdminAction()) return;
 
         try {
             await updateDoc(doc(db, "usuarios", editandoId), {
@@ -269,6 +291,7 @@ const AdminPanel = () => {
 
     const enviarComunicadoGeral = async (e) => {
         e.preventDefault();
+        if (!ensureOnlineAdminAction()) return;
 
         const mensagem = comunicadoGeral.trim();
         const destinatarios = usuarios.filter((user) => user.role === 'admin' || user.role === 'comum');
@@ -381,6 +404,7 @@ const AdminPanel = () => {
     };
 
     const ativarCampanha = async ({ id, titulo }) => {
+        if (!ensureOnlineAdminAction()) return;
         setSalvandoCampanha(true);
 
         try {
@@ -449,6 +473,7 @@ const AdminPanel = () => {
     };
 
     const voltarModoNormal = async () => {
+        if (!ensureOnlineAdminAction()) return;
         if (!(await confirm({
             title: 'Desativar campanha',
             message: 'Voltar o sistema para a pregação normal agora?',
@@ -496,6 +521,7 @@ const AdminPanel = () => {
 
     const excluirCampanha = async () => {
         if (!campanhaParaExcluir) return;
+        if (!ensureOnlineAdminAction()) return;
 
         if (contextoSistema.contextoAtivoId === campanhaParaExcluir.id) {
             notify({
@@ -585,6 +611,11 @@ const AdminPanel = () => {
                         ← Voltar ao Mapa
                     </Link>
                 </header>
+                {!isOnline && (
+                    <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-900 shadow-sm">
+                        {ADMIN_OFFLINE_MESSAGE}
+                    </div>
+                )}
 
                 {/* CARDS DE RESUMO */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
@@ -637,8 +668,8 @@ const AdminPanel = () => {
                                             <button
                                                 type="button"
                                                 onClick={voltarModoNormal}
-                                                disabled={salvandoCampanha}
-                                                className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 disabled:opacity-50"
+                                                disabled={salvandoCampanha || adminActionsDisabled}
+                                                className={`px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                             >
                                                 Desativar Campanha
                                             </button>
@@ -655,34 +686,36 @@ const AdminPanel = () => {
                             </div>
                         </div>
 
-                        <form onSubmit={handleCriarCampanha} className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr_auto] gap-3 items-end">
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Título da Campanha</label>
-                                <input
-                                    type="text"
-                                    placeholder="Ex: Convite da Celebração"
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
-                                    value={campanhaTitulo}
-                                    onChange={(e) => setCampanhaTitulo(e.target.value)}
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Identificador Interno</label>
-                                <input
-                                    type="text"
-                                    placeholder="ex: celebracao_2026"
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
-                                    value={campanhaSlug}
-                                    onChange={(e) => setCampanhaSlug(slugifyCampanha(e.target.value))}
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                disabled={salvandoCampanha}
-                                className="bg-violet-600 hover:bg-violet-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all active:scale-95 disabled:opacity-50"
-                            >
-                                {salvandoCampanha ? 'Salvando...' : 'Ativar Campanha'}
-                            </button>
+                        <form onSubmit={handleCriarCampanha}>
+                            <fieldset disabled={adminActionsDisabled || salvandoCampanha} className={`grid grid-cols-1 lg:grid-cols-[1.4fr_1fr_auto] gap-3 items-end ${adminActionsDisabled ? 'opacity-60' : ''}`}>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Título da Campanha</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: Convite da Celebração"
+                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
+                                        value={campanhaTitulo}
+                                        onChange={(e) => setCampanhaTitulo(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Identificador Interno</label>
+                                    <input
+                                        type="text"
+                                        placeholder="ex: celebracao_2026"
+                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
+                                        value={campanhaSlug}
+                                        onChange={(e) => setCampanhaSlug(slugifyCampanha(e.target.value))}
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    disabled={salvandoCampanha || adminActionsDisabled}
+                                    className={`bg-violet-600 hover:bg-violet-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all active:scale-95 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                >
+                                    {salvandoCampanha ? 'Salvando...' : 'Ativar Campanha'}
+                                </button>
+                            </fieldset>
                         </form>
 
                         {campanhas.length > 0 && (
@@ -706,8 +739,8 @@ const AdminPanel = () => {
                                                     <button
                                                         type="button"
                                                         onClick={() => ativarCampanha({ id: campanha.id, titulo: campanha.titulo || campanha.id })}
-                                                        disabled={salvandoCampanha || ativa}
-                                                        className="w-full rounded-lg border border-violet-200 bg-white py-2 text-sm font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                                                        disabled={salvandoCampanha || ativa || adminActionsDisabled}
+                                                        className={`w-full rounded-lg border border-violet-200 bg-white py-2 text-sm font-bold text-violet-700 hover:bg-violet-50 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                     >
                                                         {ativa ? 'Campanha Atual' : 'Reativar'}
                                                     </button>
@@ -715,8 +748,8 @@ const AdminPanel = () => {
                                                         <button
                                                             type="button"
                                                             onClick={voltarModoNormal}
-                                                            disabled={salvandoCampanha}
-                                                            className="w-full rounded-lg bg-red-600 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                                                            disabled={salvandoCampanha || adminActionsDisabled}
+                                                            className={`w-full rounded-lg bg-red-600 py-2 text-sm font-bold text-white hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                         >
                                                             Desativar Agora
                                                         </button>
@@ -725,8 +758,8 @@ const AdminPanel = () => {
                                                         <button
                                                             type="button"
                                                             onClick={() => abrirModalExclusaoCampanha(campanha)}
-                                                            disabled={salvandoCampanha || excluindoCampanha}
-                                                            className="w-full rounded-lg border border-red-200 bg-white py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                                            disabled={salvandoCampanha || excluindoCampanha || adminActionsDisabled}
+                                                            className={`w-full rounded-lg border border-red-200 bg-white py-2 text-sm font-bold text-red-700 hover:bg-red-50 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                         >
                                                             Excluir Campanha
                                                         </button>
@@ -753,57 +786,59 @@ const AdminPanel = () => {
                         </h3>
                     </div>
                     <div className="p-5">
-                        <form onSubmit={enviarComunicadoGeral} className="space-y-4">
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Destino</label>
-                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                    <label className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${destinoComunicado === 'todos' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                                        <input
-                                            type="radio"
-                                            name="destino-comunicado"
-                                            value="todos"
-                                            checked={destinoComunicado === 'todos'}
-                                            onChange={(e) => setDestinoComunicado(e.target.value)}
-                                        />
-                                        <span className="text-sm font-semibold text-gray-700">Todos os aprovados</span>
-                                    </label>
-                                    <label className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${destinoComunicado === 'admins' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                                        <input
-                                            type="radio"
-                                            name="destino-comunicado"
-                                            value="admins"
-                                            checked={destinoComunicado === 'admins'}
-                                            onChange={(e) => setDestinoComunicado(e.target.value)}
-                                        />
-                                        <span className="text-sm font-semibold text-gray-700">Somente admins</span>
-                                    </label>
+                        <form onSubmit={enviarComunicadoGeral}>
+                            <fieldset disabled={adminActionsDisabled || enviandoComunicado} className={`space-y-4 ${adminActionsDisabled ? 'opacity-60' : ''}`}>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Destino</label>
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                        <label className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${destinoComunicado === 'todos' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                                            <input
+                                                type="radio"
+                                                name="destino-comunicado"
+                                                value="todos"
+                                                checked={destinoComunicado === 'todos'}
+                                                onChange={(e) => setDestinoComunicado(e.target.value)}
+                                            />
+                                            <span className="text-sm font-semibold text-gray-700">Todos os aprovados</span>
+                                        </label>
+                                        <label className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${destinoComunicado === 'admins' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+                                            <input
+                                                type="radio"
+                                                name="destino-comunicado"
+                                                value="admins"
+                                                checked={destinoComunicado === 'admins'}
+                                                onChange={(e) => setDestinoComunicado(e.target.value)}
+                                            />
+                                            <span className="text-sm font-semibold text-gray-700">Somente admins</span>
+                                        </label>
+                                    </div>
                                 </div>
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Mensagem para todos os usuários aprovados</label>
-                                <textarea
-                                    rows={4}
-                                    placeholder="Ex: O app foi atualizado. Fechem e abram novamente para carregar a nova versão."
-                                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-amber-400 focus:border-transparent outline-none transition-all resize-y"
-                                    value={comunicadoGeral}
-                                    onChange={(e) => setComunicadoGeral(e.target.value)}
-                                />
-                            </div>
-                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                                <p className="text-sm text-gray-500">
-                                    Envia uma notificação interna para <span className="font-bold text-gray-700">{totalDestinoComunicado}</span> {destinoComunicado === 'admins' ? 'admin(s)' : 'usuário(s) aprovados'}.
-                                    {relayDisponivel()
-                                        ? ' Quem tiver o app com FCM ativo também pode receber push mesmo com o app fechado.'
-                                        : ' Quem estiver com o app aberto recebe na hora; quem abrir depois vê no sininho.'}
-                                </p>
-                                <button
-                                    type="submit"
-                                    disabled={enviandoComunicado || totalDestinoComunicado === 0}
-                                    className="bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all active:scale-95 disabled:opacity-50"
-                                >
-                                    {enviandoComunicado ? 'Enviando...' : 'Enviar Comunicado'}
-                                </button>
-                            </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Mensagem para todos os usuários aprovados</label>
+                                    <textarea
+                                        rows={4}
+                                        placeholder="Ex: O app foi atualizado. Fechem e abram novamente para carregar a nova versão."
+                                        className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-amber-400 focus:border-transparent outline-none transition-all resize-y"
+                                        value={comunicadoGeral}
+                                        onChange={(e) => setComunicadoGeral(e.target.value)}
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                    <p className="text-sm text-gray-500">
+                                        Envia uma notificação interna para <span className="font-bold text-gray-700">{totalDestinoComunicado}</span> {destinoComunicado === 'admins' ? 'admin(s)' : 'usuário(s) aprovados'}.
+                                        {relayDisponivel()
+                                            ? ' Quem tiver o app com FCM ativo também pode receber push mesmo com o app fechado.'
+                                            : ' Quem estiver com o app aberto recebe na hora; quem abrir depois vê no sininho.'}
+                                    </p>
+                                    <button
+                                        type="submit"
+                                        disabled={enviandoComunicado || totalDestinoComunicado === 0 || adminActionsDisabled}
+                                        className={`bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all active:scale-95 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                    >
+                                        {enviandoComunicado ? 'Enviando...' : 'Enviar Comunicado'}
+                                    </button>
+                                </div>
+                            </fieldset>
                         </form>
                     </div>
                 </div>
@@ -816,46 +851,48 @@ const AdminPanel = () => {
                         </h3>
                     </div>
                     <div className="p-5">
-                        <form onSubmit={handleAdicionar} className="flex flex-col md:flex-row gap-3 items-end">
-                            <div className="flex-1 w-full">
-                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Nome Completo</label>
-                                <input
-                                    type="text"
-                                    placeholder="Ex: João Silva"
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                                    value={novoNome}
-                                    onChange={e => setNovoNome(e.target.value)}
-                                />
-                            </div>
-                            <div className="flex-1 w-full">
-                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">E-mail (Google)</label>
-                                <input
-                                    type="email"
-                                    placeholder="Ex: joao@gmail.com"
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                                    value={novoEmail}
-                                    onChange={e => setNovoEmail(e.target.value)}
-                                    required
-                                />
-                            </div>
-                            <div className="w-full md:w-48">
-                                <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">WhatsApp</label>
-                                <input
-                                    type="text"
-                                    placeholder="(46) 99999-9999"
-                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                                    value={novoWhats}
-                                    maxLength={15}
-                                    onChange={e => setNovoWhats(formatarTelefone(e.target.value))}
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                disabled={loadingAdd}
-                                className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-                            >
-                                {loadingAdd ? 'Salvando...' : '+ Adicionar'}
-                            </button>
+                        <form onSubmit={handleAdicionar}>
+                            <fieldset disabled={adminActionsDisabled || loadingAdd} className={`flex flex-col md:flex-row gap-3 items-end ${adminActionsDisabled ? 'opacity-60' : ''}`}>
+                                <div className="flex-1 w-full">
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Nome Completo</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: João Silva"
+                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                                        value={novoNome}
+                                        onChange={e => setNovoNome(e.target.value)}
+                                    />
+                                </div>
+                                <div className="flex-1 w-full">
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">E-mail (Google)</label>
+                                    <input
+                                        type="email"
+                                        placeholder="Ex: joao@gmail.com"
+                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                                        value={novoEmail}
+                                        onChange={e => setNovoEmail(e.target.value)}
+                                        required
+                                    />
+                                </div>
+                                <div className="w-full md:w-48">
+                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">WhatsApp</label>
+                                    <input
+                                        type="text"
+                                        placeholder="(46) 99999-9999"
+                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                                        value={novoWhats}
+                                        maxLength={15}
+                                        onChange={e => setNovoWhats(formatarTelefone(e.target.value))}
+                                    />
+                                </div>
+                                <button
+                                    type="submit"
+                                    disabled={loadingAdd || adminActionsDisabled}
+                                    className={`w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                >
+                                    {loadingAdd ? 'Salvando...' : '+ Adicionar'}
+                                </button>
+                            </fieldset>
                         </form>
                     </div>
                 </div>
@@ -879,6 +916,7 @@ const AdminPanel = () => {
                                                 onChange={e => handleEditChange('nome', e.target.value)}
                                                 className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
                                                 placeholder="Nome"
+                                                disabled={adminActionsDisabled}
                                             />
                                         ) : (
                                             <h4 className="font-bold text-gray-800 text-base">{user.nome || 'Sem Nome'}</h4>
@@ -908,6 +946,7 @@ const AdminPanel = () => {
                                         onChange={e => handleEditChange('whatsapp', e.target.value)}
                                         className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
                                         placeholder="WhatsApp"
+                                        disabled={adminActionsDisabled}
                                     />
                                 ) : (
                                     user.whatsapp ? (
@@ -924,25 +963,40 @@ const AdminPanel = () => {
                             <div className="flex gap-2 border-t border-gray-100 pt-3">
                                 {editandoId === user.id ? (
                                     <>
-                                        <button onClick={salvarEdicao} className="flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-sm">Salvar</button>
+                                        <button
+                                            onClick={salvarEdicao}
+                                            disabled={adminActionsDisabled}
+                                            className={`flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-sm ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                        >
+                                            Salvar
+                                        </button>
                                         <button onClick={cancelarEdicao} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-bold text-sm">Cancelar</button>
                                     </>
                                 ) : (
                                     <>
                                         {user.role === 'aguardando' ? (
-                                            <button onClick={() => mudarRole(user, 'comum')} className="flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-sm shadow-sm active:scale-95 transition-transform">
+                                            <button
+                                                onClick={() => mudarRole(user, 'comum')}
+                                                disabled={adminActionsDisabled}
+                                                className={`flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-sm shadow-sm active:scale-95 transition-transform ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                            >
                                                 Aprovar Acesso
                                             </button>
                                         ) : (
                                             <>
-                                                <button onClick={() => iniciarEdicao(user)} className="p-2 bg-gray-50 text-blue-600 rounded-lg border border-gray-200 flex-1 flex justify-center items-center">
+                                                <button
+                                                    onClick={() => iniciarEdicao(user)}
+                                                    disabled={adminActionsDisabled}
+                                                    className={`p-2 bg-gray-50 text-blue-600 rounded-lg border border-gray-200 flex-1 flex justify-center items-center ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                >
                                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
                                                 </button>
 
                                                 {/* BOTÃO PROMOVER / REBAIXAR - NOVO ÍCONE */}
                                                 <button 
                                                     onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')} 
-                                                    className={`p-2 rounded-lg border flex-1 flex justify-center items-center transition-colors ${user.role === 'admin' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-yellow-50 text-yellow-600 border-yellow-100'}`}
+                                                    disabled={adminActionsDisabled}
+                                                    className={`p-2 rounded-lg border flex-1 flex justify-center items-center transition-colors ${user.role === 'admin' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-yellow-50 text-yellow-600 border-yellow-100'} ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                 >
                                                     {user.role === 'admin' ? (
                                                         // ÍCONE DE USUÁRIO (Rebaixar)
@@ -958,7 +1012,11 @@ const AdminPanel = () => {
                                                 </button>
                                             </>
                                         )}
-                                        <button onClick={() => remover(user.id)} className="p-2 bg-red-50 text-red-600 rounded-lg border border-red-100 flex-1 flex justify-center items-center">
+                                        <button
+                                            onClick={() => remover(user.id)}
+                                            disabled={adminActionsDisabled}
+                                            className={`p-2 bg-red-50 text-red-600 rounded-lg border border-red-100 flex-1 flex justify-center items-center ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                        >
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
                                         </button>
                                     </>
@@ -997,6 +1055,7 @@ const AdminPanel = () => {
                                                         onChange={e => handleEditChange('nome', e.target.value)}
                                                         className="px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
                                                         placeholder="Nome"
+                                                        disabled={adminActionsDisabled}
                                                     />
                                                     <span className="text-xs text-gray-400 font-mono pl-1">{user.id} (Fixo)</span>
                                                 </div>
@@ -1022,6 +1081,7 @@ const AdminPanel = () => {
                                                     onChange={e => handleEditChange('whatsapp', e.target.value)}
                                                     className="w-32 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
                                                     placeholder="WhatsApp"
+                                                    disabled={adminActionsDisabled}
                                                 />
                                             ) : (
                                                 user.whatsapp ? (
@@ -1058,7 +1118,12 @@ const AdminPanel = () => {
                                                 {/* MODO EDIÇÃO */}
                                                 {editandoId === user.id ? (
                                                     <>
-                                                        <button onClick={salvarEdicao} className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors" title="Salvar">
+                                                        <button
+                                                            onClick={salvarEdicao}
+                                                            disabled={adminActionsDisabled}
+                                                            className={`p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                            title="Salvar"
+                                                        >
                                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
                                                         </button>
                                                         <button onClick={cancelarEdicao} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors" title="Cancelar">
@@ -1069,18 +1134,28 @@ const AdminPanel = () => {
                                                     /* MODO VISUALIZAÇÃO */
                                                     <>
                                                         {user.role === 'aguardando' ? (
-                                                            <button onClick={() => mudarRole(user, 'comum')} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all">
+                                                            <button
+                                                                onClick={() => mudarRole(user, 'comum')}
+                                                                disabled={adminActionsDisabled}
+                                                                className={`px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                            >
                                                                 Aprovar
                                                             </button>
                                                         ) : (
-                                                            <button onClick={() => iniciarEdicao(user)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar Dados">
+                                                            <button
+                                                                onClick={() => iniciarEdicao(user)}
+                                                                disabled={adminActionsDisabled}
+                                                                className={`p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                title="Editar Dados"
+                                                            >
                                                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
                                                             </button>
                                                         )}
 
                                                         <button
                                                             onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')}
-                                                            className={`p-2 rounded-lg transition-colors ${user.role === 'admin' ? 'text-purple-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'}`}
+                                                            disabled={adminActionsDisabled}
+                                                            className={`p-2 rounded-lg transition-colors ${user.role === 'admin' ? 'text-purple-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'} ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                             title={user.role === 'admin' ? "Remover Admin (Voltar a Dirigente)" : "Promover a Admin"}
                                                         >
                                                             {user.role === 'admin' ? (
@@ -1096,7 +1171,12 @@ const AdminPanel = () => {
                                                             )}
                                                         </button>
 
-                                                        <button onClick={() => remover(user.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Remover Usuário">
+                                                        <button
+                                                            onClick={() => remover(user.id)}
+                                                            disabled={adminActionsDisabled}
+                                                            className={`p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                            title="Remover Usuário"
+                                                        >
                                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
                                                         </button>
                                                     </>
@@ -1166,7 +1246,7 @@ const AdminPanel = () => {
                                     onChange={(e) => setConfirmacaoExclusao(e.target.value)}
                                     placeholder="Confirme o identificador"
                                     className="w-full rounded-lg border border-gray-300 px-4 py-3 outline-none transition-all focus:border-red-400 focus:ring-2 focus:ring-red-200"
-                                    disabled={excluindoCampanha}
+                                    disabled={excluindoCampanha || adminActionsDisabled}
                                 />
                             </div>
 
@@ -1182,8 +1262,8 @@ const AdminPanel = () => {
                                 <button
                                     type="button"
                                     onClick={excluirCampanha}
-                                    disabled={excluindoCampanha || carregandoResumoExclusao || confirmacaoExclusao.trim() !== campanhaParaExcluir.id}
-                                    className="rounded-lg bg-red-600 px-4 py-2.5 font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                                    disabled={excluindoCampanha || carregandoResumoExclusao || confirmacaoExclusao.trim() !== campanhaParaExcluir.id || adminActionsDisabled}
+                                    className={`rounded-lg bg-red-600 px-4 py-2.5 font-bold text-white hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                 >
                                     {excluindoCampanha ? 'Excluindo...' : 'Excluir definitivamente'}
                                 </button>

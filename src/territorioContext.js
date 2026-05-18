@@ -43,7 +43,15 @@ export function buildBaseTerritorioDefaults(nome) {
         status: TERRITORIO_STATUS.ABERTO,
         nome,
         quadras_feitas: [],
-        notas_quadras: {}
+        notas_quadras: {},
+        historico: [],
+        designadoPara: null,
+        designadoNome: null,
+        dataDesignacao: null,
+        designacaoId: null,
+        cicloAtual: null,
+        ultimaConclusao: null,
+        ultimaAlteracao: null
     };
 }
 
@@ -57,7 +65,40 @@ export function buildContextTerritorioDefaults({ idTerritorio, nome, contextoSis
         contextoTipo: contextoSistema.contextoAtivoTipo,
         contextoTitulo: contextoSistema.contextoAtivoTitulo,
         quadras_feitas: [],
-        historico: []
+        historico: [],
+        designadoPara: null,
+        designadoNome: null,
+        dataDesignacao: null,
+        designacaoId: null,
+        cicloAtual: null,
+        ultimaConclusao: null,
+        ultimaAlteracao: null
+    };
+}
+
+export function buildTerritorioStateSeed({ contextoId, idTerritorio, nome, contextoSistema }) {
+    if (isNormalContext(contextoId)) {
+        const baseSeed = buildBaseTerritorioDefaults(nome);
+        const seedOperacional = { ...baseSeed };
+        delete seedOperacional.notas_quadras;
+        return seedOperacional;
+    }
+
+    return buildContextTerritorioDefaults({ idTerritorio, nome, contextoSistema });
+}
+
+export function buildTerritorioStateMergeSeed({ contextoId, idTerritorio, nome, contextoSistema }) {
+    if (isNormalContext(contextoId)) {
+        return { nome };
+    }
+
+    return {
+        nome,
+        territorioBaseId: getTerritorioBaseId(idTerritorio),
+        territorioNumero: idTerritorio,
+        contextoId: contextoSistema.contextoAtivoId,
+        contextoTipo: contextoSistema.contextoAtivoTipo,
+        contextoTitulo: contextoSistema.contextoAtivoTitulo
     };
 }
 
@@ -84,6 +125,7 @@ export function mergeTerritorioData({ contextoId, nomeFallback, baseData, stateD
         designadoPara: null,
         designadoNome: null,
         dataDesignacao: null,
+        designacaoId: null,
         cicloAtual: null,
         historico: [],
         ultimaConclusao: null,

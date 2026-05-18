@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { signInWithPopup, onAuthStateChanged } from 'firebase/auth';
 import { auth, googleProvider, db } from './firebase';
@@ -19,6 +19,8 @@ import { getSistemaTheme, isNormalContext } from './sistema';
 import { getTerritorioContextCollectionRef, getTerritorioProgresso, getTerritorioStateRef } from './territorioContext';
 import { useCoberturaCampanha } from './useCoberturaCampanha';
 import { finalizarTerritorioDesignado } from './territorioActions';
+import { describeOutboxConflict } from './territorioOfflineModel';
+import { useTerritorioOutbox, useTerritorioSync } from './useTerritorioOffline';
 import { UiFeedbackProvider, useUiFeedback } from './uiFeedback';
 
 const Mapa = lazy(() => import('./Mapa'));
@@ -784,6 +786,141 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
   );
 };
 
+const StatusSincronizacaoChip = ({
+  isAdmin,
+  isOnline,
+  onlineSyncCount,
+  offlinePendingCount,
+  failedCount,
+  conflictCount,
+  conflictActions,
+  aberto,
+  onToggle,
+  onClose
+}) => {
+  const hasStatus = !isOnline || offlinePendingCount > 0 || failedCount > 0 || conflictCount > 0;
+  if (!hasStatus) return null;
+
+  const infoOffline = isAdmin
+    ? 'Você está offline. Ações administrativas precisam de conexão para evitar conflito de designações.'
+    : 'Você está offline. As alterações do seu território ficam salvas localmente e sincronizam quando a conexão voltar.';
+
+  let chipClasses = 'border-white/20 bg-white/12 text-white';
+  let chipLabel = 'Status';
+
+  if (conflictCount > 0) {
+    chipClasses = 'border-red-200/70 bg-red-50 text-red-700';
+    chipLabel = `${conflictCount} conflito${conflictCount === 1 ? '' : 's'}`;
+  } else if (failedCount > 0) {
+    chipClasses = 'border-orange-200/70 bg-orange-50 text-orange-700';
+    chipLabel = `${failedCount} retry`;
+  } else if (!isOnline) {
+    chipClasses = 'border-amber-200/70 bg-amber-50 text-amber-800';
+    chipLabel = offlinePendingCount > 0 ? `Offline · ${offlinePendingCount}` : 'Offline';
+  } else if (onlineSyncCount > 0) {
+    chipClasses = 'border-sky-200/70 bg-sky-50 text-sky-700';
+    chipLabel = onlineSyncCount === 1 ? 'Salvando' : `Salvando ${onlineSyncCount}`;
+  }
+
+  return (
+    <>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={onToggle}
+          className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.14em] shadow-sm transition-all active:scale-95 ${chipClasses}`}
+          aria-expanded={aberto}
+          aria-haspopup="dialog"
+          title="Status da sincronização offline"
+        >
+          <span className="inline-block h-2 w-2 rounded-full bg-current opacity-80"></span>
+          <span>{chipLabel}</span>
+        </button>
+        <div className={`fixed left-3 right-3 top-[4.75rem] z-[60] origin-top overflow-hidden rounded-2xl border border-slate-200 bg-white/98 shadow-2xl backdrop-blur transition-all duration-200 sm:absolute sm:left-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[24rem] sm:origin-top-right ${aberto ? 'pointer-events-auto translate-y-0 scale-100 opacity-100' : 'pointer-events-none -translate-y-2 scale-[0.98] opacity-0'}`}>
+          <div className="border-b border-slate-100 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Status do envio</p>
+                <p className="mt-1 text-sm font-bold text-slate-800">Sincronização e modo offline</p>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg px-2 py-1 text-slate-300 transition hover:bg-slate-100 hover:text-slate-500"
+                aria-label="Fechar status"
+              >
+                x
+              </button>
+            </div>
+          </div>
+          <div className="space-y-3 px-4 py-4 text-sm">
+            {!isOnline && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-amber-900">
+                {infoOffline}
+              </div>
+            )}
+            {onlineSyncCount > 0 && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sky-800">
+                Salvando alteraç{onlineSyncCount === 1 ? 'ão' : 'ões'} agora.
+              </div>
+            )}
+            {offlinePendingCount > 0 && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-slate-800">
+                {offlinePendingCount} alteraç{offlinePendingCount === 1 ? 'ão pendente' : 'ões pendentes'} aguardando sincronização.
+              </div>
+            )}
+            {failedCount > 0 && (
+              <div className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-3 text-orange-800">
+                {failedCount} alteraç{failedCount === 1 ? 'ão precisa' : 'ões precisam'} de nova tentativa de sincronização.
+              </div>
+            )}
+            {conflictCount > 0 && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-red-800">
+                <p>{conflictCount} alteraç{conflictCount === 1 ? 'ão não pôde ser enviada' : 'ões não puderam ser enviadas'} porque a designação mudou.</p>
+                {conflictActions.length > 0 && (
+                  <div className="mt-2 space-y-1 text-xs font-medium text-red-700">
+                    {conflictActions.map((action) => (
+                      <div key={action.id}>{describeOutboxConflict(action)}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      {aberto && (
+        <button
+          type="button"
+          onClick={onClose}
+          className="fixed inset-0 z-[50] cursor-default bg-transparent"
+          aria-label="Fechar status"
+        />
+      )}
+    </>
+  );
+};
+
+const BarraSalvandoHeader = ({ visible, count }) => (
+  <div className={`overflow-hidden transition-all duration-300 ease-out ${visible ? 'max-h-16 opacity-100' : 'pointer-events-none max-h-0 opacity-0'}`}>
+    <div className="relative border-b border-sky-100 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-60"></span>
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-sky-500"></span>
+          </span>
+          <span>Salvando alterações</span>
+        </div>
+        <span>{count === 1 ? '1 envio' : `${count} envios`}</span>
+      </div>
+      <div className="h-0.5 w-full overflow-hidden bg-sky-100">
+        <div className="h-full w-1/3 animate-[header-saving-slide_1.2s_ease-in-out_infinite] rounded-full bg-sky-500"></div>
+      </div>
+    </div>
+  </div>
+);
+
 // --- MODAL DE LEGENDA ---
 const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
   if (!isOpen) return null;
@@ -1015,6 +1152,7 @@ function Dashboard() {
   const [confirmarLogoutAberto, setConfirmarLogoutAberto] = useState(false);
   const [pushStatus, setPushStatus] = useState('oculto');
   const [ativandoPush, setAtivandoPush] = useState(false);
+  const [statusSyncAberto, setStatusSyncAberto] = useState(false);
   const { notify } = useUiFeedback();
 
   useEffect(() => {
@@ -1030,6 +1168,18 @@ function Dashboard() {
   }, [navigate]);
 
   const { isAdmin, autorizado, loading: verificandoBanco, role } = useUsuario(user);
+  const isOnline = useTerritorioSync({
+    db,
+    userEmail: user?.email,
+    enabled: Boolean(user?.email && autorizado)
+  });
+  const { actions: outboxActions, summary: outboxSummary } = useTerritorioOutbox(user?.email);
+  const conflictActions = useMemo(
+    () => outboxActions.filter((action) => action.status === 'conflict').slice(0, 3),
+    [outboxActions]
+  );
+  const onlineSyncCount = isOnline ? (outboxSummary.pendingCount + outboxSummary.syncingCount) : 0;
+  const offlinePendingCount = !isOnline ? outboxSummary.pendingCount : 0;
 
   useEffect(() => {
     if (!user || !autorizado || !Capacitor.isNativePlatform()) return;
@@ -1204,6 +1354,12 @@ function Dashboard() {
   // 3. TELA PRINCIPAL (DASHBOARD)
   return (
     <div className="h-[100dvh] flex flex-col overflow-hidden relative">
+      <style>{`
+        @keyframes header-saving-slide {
+          0% { transform: translateX(-140%); }
+          100% { transform: translateX(420%); }
+        }
+      `}</style>
       <MenuLateral
         isOpen={menuAberto}
         onClose={() => setMenuAberto(false)}
@@ -1250,90 +1406,107 @@ function Dashboard() {
       />
 
       {/* CABEÇALHO */}
-      <div className={`app-safe-header min-h-16 ${temaSistema.headerBg} text-white shadow-md z-20 px-2.5 sm:px-4 flex items-center justify-between flex-shrink-0`}>
-        
-        {/* LADO ESQUERDO: LOGO E TÍTULO */}
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-          <img 
-            src={APP_ICON_192} 
-            alt="Logo" 
-            className={`h-9 w-9 rounded-lg shadow-sm ${temaSistema.headerBorder} border`} 
-          />
-          <div className="min-w-0 flex-1">
-            <span className="text-xl font-bold tracking-wide hidden sm:block">Territórios</span>
-            <div className="sm:hidden">
+      <div className="relative z-20 flex-shrink-0">
+        <div className={`app-safe-header min-h-16 ${temaSistema.headerBg} text-white shadow-md px-2.5 sm:px-4 flex items-center justify-between`}>
+          
+          {/* LADO ESQUERDO: LOGO E TÍTULO */}
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+            <img 
+              src={APP_ICON_192} 
+              alt="Logo" 
+              className={`h-9 w-9 rounded-lg shadow-sm ${temaSistema.headerBorder} border`} 
+            />
+            <div className="min-w-0 flex-1">
+              <span className="text-xl font-bold tracking-wide hidden sm:block">Territórios</span>
+              <div className="sm:hidden">
+                <SistemaChip
+                  contextoSistema={contextoSistema}
+                  coverageOnly
+                  coberturaCampanha={coberturaCampanha}
+                  carregandoCobertura={coberturaCampanha.loading}
+                />
+              </div>
+            </div>
+            <div className="hidden sm:block">
               <SistemaChip
                 contextoSistema={contextoSistema}
-                coverageOnly
                 coberturaCampanha={coberturaCampanha}
                 carregandoCobertura={coberturaCampanha.loading}
               />
             </div>
           </div>
-          <div className="hidden sm:block">
-            <SistemaChip
-              contextoSistema={contextoSistema}
-              coberturaCampanha={coberturaCampanha}
-              carregandoCobertura={coberturaCampanha.loading}
+
+          {/* LADO DIREITO: ÍCONES E BOTÕES */}
+          <div className="ml-1.5 sm:ml-3 flex shrink-0 items-center gap-1 sm:gap-3">
+            <StatusSincronizacaoChip
+              isAdmin={isAdmin}
+              isOnline={isOnline}
+              onlineSyncCount={onlineSyncCount}
+              offlinePendingCount={offlinePendingCount}
+              failedCount={outboxSummary.failedCount}
+              conflictCount={outboxSummary.conflictCount}
+              conflictActions={conflictActions}
+              aberto={statusSyncAberto}
+              onToggle={() => setStatusSyncAberto((current) => !current)}
+              onClose={() => setStatusSyncAberto(false)}
             />
+            
+            {/* ATALHO 1: RELATÓRIOS (SÓ ADMIN) - Sempre visível agora */}
+            {isAdmin && (
+              <button
+                onClick={() => navigate('/relatorios')}
+                className={`p-1.5 sm:p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
+                title="Relatórios"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+              </button>
+            )}
+
+            {/* ATALHO 2: AJUDA (QUEM NÃO É ADMIN) - Sempre visível agora */}
+            {!isAdmin && (
+              <button
+                onClick={() => setAjudaAberta(true)}
+                className={`p-1.5 sm:p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
+                title="Como Usar"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
+            )}
+
+            <SininhoNotificacoes
+              user={user}
+              isAdmin={isAdmin}
+              pushStatus={pushStatus}
+              ativandoPush={ativandoPush}
+              onAtivarPush={handleAtivarPush}
+            />
+
+            <button
+              onClick={() => setMeusTerritoriosAberto(true)}
+              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 ${temaSistema.headerSoft} ${temaSistema.headerSoftHover} rounded-full shadow-sm text-sm font-semibold transition-colors active:scale-95 ${temaSistema.headerBorder} border`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+              </svg>
+              <span className="text-xs uppercase tracking-wider">Meus</span>
+            </button>
+
+            <button
+              onClick={() => setMenuAberto(true)}
+              className={`p-1 ${temaSistema.headerHover} rounded transition-colors ml-0.5 sm:ml-1`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
           </div>
         </div>
-
-        {/* LADO DIREITO: ÍCONES E BOTÕES */}
-        <div className="ml-1.5 sm:ml-3 flex shrink-0 items-center gap-1 sm:gap-3">
-          
-          {/* ATALHO 1: RELATÓRIOS (SÓ ADMIN) - Sempre visível agora */}
-          {isAdmin && (
-            <button
-              onClick={() => navigate('/relatorios')}
-              className={`p-1.5 sm:p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
-              title="Relatórios"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-              </svg>
-            </button>
-          )}
-
-          {/* ATALHO 2: AJUDA (QUEM NÃO É ADMIN) - Sempre visível agora */}
-          {!isAdmin && (
-            <button
-              onClick={() => setAjudaAberta(true)}
-              className={`p-1.5 sm:p-2 text-white/90 hover:text-white ${temaSistema.headerHover} rounded-full transition-colors relative`}
-              title="Como Usar"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </button>
-          )}
-
-          <SininhoNotificacoes
-            user={user}
-            isAdmin={isAdmin}
-            pushStatus={pushStatus}
-            ativandoPush={ativandoPush}
-            onAtivarPush={handleAtivarPush}
-          />
-
-          <button
-            onClick={() => setMeusTerritoriosAberto(true)}
-            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 ${temaSistema.headerSoft} ${temaSistema.headerSoftHover} rounded-full shadow-sm text-sm font-semibold transition-colors active:scale-95 ${temaSistema.headerBorder} border`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-            </svg>
-            <span className="text-xs uppercase tracking-wider">Meus</span>
-          </button>
-
-          <button
-            onClick={() => setMenuAberto(true)}
-            className={`p-1 ${temaSistema.headerHover} rounded transition-colors ml-0.5 sm:ml-1`}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
+        <div className="pointer-events-none absolute left-0 right-0 top-full">
+          <BarraSalvandoHeader visible={isOnline && onlineSyncCount > 0} count={onlineSyncCount} />
         </div>
       </div>
 
@@ -1348,7 +1521,13 @@ function Dashboard() {
             </div>
           }
         >
-          <Mapa user={user} isAdmin={isAdmin} contextoSistema={contextoSistema} />
+          <Mapa
+            user={user}
+            isAdmin={isAdmin}
+            contextoSistema={contextoSistema}
+            isOnline={isOnline}
+            outboxActions={outboxActions}
+          />
         </Suspense>
       </div>
     </div>

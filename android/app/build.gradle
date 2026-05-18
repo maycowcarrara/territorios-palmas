@@ -43,8 +43,8 @@ android {
         applicationId activeApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 236
-        versionName "2.2.236"
+        versionCode 265
+        versionName "2.2.265"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resValue "string", "app_name", activeAppName
         resValue "string", "title_activity_main", activeAppName

@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 const UiFeedbackContext = createContext(null);
 
 const TOAST_LIMIT = 4;
+const TOAST_EXIT_MS = 220;
 
 const VARIANT_STYLES = {
     success: {
@@ -216,7 +217,7 @@ const ToastViewport = ({ toasts, onDismiss }) => (
                 return (
                     <div
                         key={toast.id}
-                        className={`pointer-events-auto overflow-hidden rounded-2xl border bg-white/95 shadow-2xl ring-1 backdrop-blur ${style.border} ${style.ring}`}
+                        className={`pointer-events-auto overflow-hidden rounded-2xl border bg-white/95 shadow-2xl ring-1 backdrop-blur transition-all duration-300 ease-out ${style.border} ${style.ring} ${toast.isVisible && !toast.isClosing ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.98] opacity-0'}`}
                         role="status"
                     >
                         <div className={`h-1 w-full bg-gradient-to-r ${style.accent}`}></div>
@@ -297,32 +298,62 @@ const ConfirmDialog = ({ request, onConfirm, onCancel }) => {
 export const UiFeedbackProvider = ({ children }) => {
     const [toasts, setToasts] = useState([]);
     const [confirmQueue, setConfirmQueue] = useState([]);
-    const timersRef = useRef(new Map());
+    const autoDismissTimersRef = useRef(new Map());
+    const exitTimersRef = useRef(new Map());
 
-    const dismissToast = useCallback((id) => {
-        const timeoutId = timersRef.current.get(id);
-        if (timeoutId) {
-            window.clearTimeout(timeoutId);
-            timersRef.current.delete(id);
-        }
-
+    const removeToast = useCallback((id) => {
         setToasts((current) => current.filter((toast) => toast.id !== id));
     }, []);
+
+    const dismissToast = useCallback((id) => {
+        const timeoutId = autoDismissTimersRef.current.get(id);
+        if (timeoutId) {
+            window.clearTimeout(timeoutId);
+            autoDismissTimersRef.current.delete(id);
+        }
+
+        if (exitTimersRef.current.has(id)) {
+            return;
+        }
+
+        setToasts((current) => current.map((toast) => (
+            toast.id === id
+                ? { ...toast, isClosing: true, isVisible: false }
+                : toast
+        )));
+
+        const exitTimeoutId = window.setTimeout(() => {
+            exitTimersRef.current.delete(id);
+            removeToast(id);
+        }, TOAST_EXIT_MS);
+
+        exitTimersRef.current.set(id, exitTimeoutId);
+    }, [removeToast]);
 
     const notify = useCallback((input) => {
         const normalized = normalizeToastInput(input);
         const toast = {
             id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            isVisible: false,
+            isClosing: false,
             ...normalized
         };
 
         setToasts((current) => [...current, toast].slice(-TOAST_LIMIT));
 
+        window.requestAnimationFrame(() => {
+            setToasts((current) => current.map((currentToast) => (
+                currentToast.id === toast.id
+                    ? { ...currentToast, isVisible: true }
+                    : currentToast
+            )));
+        });
+
         const timeoutId = window.setTimeout(() => {
             dismissToast(toast.id);
         }, toast.durationMs);
 
-        timersRef.current.set(toast.id, timeoutId);
+        autoDismissTimersRef.current.set(toast.id, timeoutId);
 
         return toast.id;
     }, [dismissToast]);
@@ -359,8 +390,10 @@ export const UiFeedbackProvider = ({ children }) => {
     }, [activeConfirm, resolveConfirm]);
 
     useEffect(() => () => {
-        timersRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
-        timersRef.current.clear();
+        autoDismissTimersRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+        autoDismissTimersRef.current.clear();
+        exitTimersRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+        exitTimersRef.current.clear();
     }, []);
 
     const contextValue = useMemo(() => ({

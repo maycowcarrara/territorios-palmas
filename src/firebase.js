@@ -1,6 +1,11 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore"; // Apenas getFirestore
+import {
+    getFirestore,
+    initializeFirestore,
+    persistentLocalCache,
+    persistentMultipleTabManager
+} from "firebase/firestore";
 
 const requiredFirebaseEnv = [
     "VITE_FIREBASE_API_KEY",
@@ -31,5 +36,17 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Agora o DB usa a conexão direta, sem "cache offline perigoso" para iOS
-export const db = getFirestore(app);
+let firestoreInstance;
+
+try {
+    firestoreInstance = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager()
+        })
+    });
+} catch (error) {
+    console.warn("Nao foi possivel inicializar o cache persistente do Firestore. Usando fallback padrao.", error);
+    firestoreInstance = getFirestore(app);
+}
+
+export const db = firestoreInstance;
