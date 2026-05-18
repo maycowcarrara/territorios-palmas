@@ -1,5 +1,7 @@
 apply plugin: 'com.android.application'
 
+import java.io.InputStreamReader
+
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
 def hasReleaseKeystore = keystorePropertiesFile.exists()
@@ -12,7 +14,7 @@ def instancePropertiesFile = file("territorios-instance.properties")
 def instanceProperties = new Properties()
 
 if (instancePropertiesFile.exists()) {
-    instanceProperties.load(new FileInputStream(instancePropertiesFile))
+    instanceProperties.load(new InputStreamReader(new FileInputStream(instancePropertiesFile), 'UTF-8'))
 }
 
 def activeApplicationId = instanceProperties['applicationId'] ?: 'br.com.territoriospalmas.app'
