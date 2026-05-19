@@ -30,6 +30,7 @@ import { reduceNotasComOutbox, reduceTerritorioComOutbox, TERRITORIO_ACTION_TYPE
 import { getGeoJsonBounds, getMapWarmProfile, scheduleTileWarm, warmMapTilesForBounds, writeOfflineMapViewportBounds } from './mapOfflineCache';
 import { buildPublicAppRouteUrl } from './publicAppUrl';
 import { buildAppLocationUrl, buildGoogleMapsUrl, buildLocationShareText, buildWhatsAppShareUrl } from './shareLinks';
+import { extractTerritorioCodigo, normalizeTerritorioNome } from './territorioNome';
 import L from 'leaflet';
 import { useUiFeedback } from './uiFeedback';
 import { enviarEventoNotificacaoPeloRelay, relayDisponivel } from './notificationRelay';
@@ -966,7 +967,7 @@ const QuadraMarker = ({ quadra, isFeita, podeMarcar, podeAnotar, nota, onAbrirNo
 
 // --- TERRITÓRIO DETALHADO ATUALIZADO ---
 const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, isOnline, outboxActions, listaUsuarios, ocultarCores, showRefs, showCondos, contextoSistema }) => {
-    const nome = dados.properties.nome || `T-${idTerritorio}`;
+    const nome = normalizeTerritorioNome(dados.properties.nome, `T-${idTerritorio}`);
     const contextoId = contextoSistema?.contextoAtivoId || 'normal';
     const contextoNormal = isNormalContext(contextoId);
     const dadosBaseIniciais = useMemo(() => buildBaseTerritorioDefaults(nome), [nome]);
@@ -998,7 +999,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
         lng: p.lng
     }));
 
-    const codigoTerritorio = nome.includes('-') ? nome.split('-')[0].trim() : nome;
+    const codigoTerritorio = extractTerritorioCodigo(nome, `T-${idTerritorio}`);
     const coords = dados.geometry.coordinates[0];
     const posicoes = coords.map(coord => [coord[1], coord[0]]);
     const centro = calcularCentroide(coords);

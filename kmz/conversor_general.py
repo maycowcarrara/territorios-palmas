@@ -139,6 +139,19 @@ def territory_id_from_name(name, fallback):
     return int(match.group(1)) if match else fallback
 
 
+def normalize_territory_name(name):
+    normalized = re.sub(r"\s+", " ", str(name or "")).strip()
+    match = re.match(r"^([A-Za-z]+\d+[A-Za-z]?)\s*-\s*(.+)$", normalized)
+    if not match:
+        match = re.match(r"^([A-Za-z]+\d+[A-Za-z]?)\s+(.+)$", normalized)
+
+    if not match:
+        return normalized
+
+    code, description = match.groups()
+    return f"{code.strip()} - {description.strip()}"
+
+
 def point_sort_key(point):
     value = str(point["nome"])
     match = re.fullmatch(r"(\d+)([a-zA-Z]?)", value)
@@ -210,7 +223,7 @@ def build_feature(kmz_path, fallback_id, buffer_degrees, max_buffer_degrees):
     if not polygons_data:
         raise ValueError(f"{kmz_path} nao contem poligonos de quadras")
 
-    territory_name = kmz_path.stem.strip()
+    territory_name = normalize_territory_name(kmz_path.stem.strip())
     pontos = []
     shapely_polys = []
     validation_points = []

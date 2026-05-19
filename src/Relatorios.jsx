@@ -8,6 +8,7 @@ import { exportarPdfParaDispositivo } from './pdfExport';
 import { buildPublicAppRouteUrl } from './publicAppUrl';
 import { useSistema } from './useSistema';
 import { getSistemaTheme, isNormalContext, NORMAL_CONTEXT_ID } from './sistema';
+import { normalizeTerritorioNome } from './territorioNome';
 import { useUiFeedback } from './uiFeedback';
 import { AppPage, PageHeader } from './uiPrimitives';
 import { buttonClass, cardBaseClass, cn } from './uiClasses';
@@ -152,7 +153,7 @@ const Relatorios = () => {
                 const numeros = Array.from(featureMap.keys()).sort((a, b) => a - b);
                 const lista = numeros.map((numeroId) => {
                     const feature = featureMap.get(numeroId);
-                    const nomeSeguro = feature?.properties?.nome || `Território ${numeroId}`;
+                    const nomeSeguro = normalizeTerritorioNome(feature?.properties?.nome, `Território ${numeroId}`);
                     const data = mergeTerritorioData({
                         contextoId: contextoRelatorioId,
                         nomeFallback: nomeSeguro,

@@ -1,5 +1,6 @@
 import { collection, doc } from 'firebase/firestore';
 import { NORMAL_CONTEXT_ID, isNormalContext } from './sistema';
+import { normalizeTerritorioNome } from './territorioNome';
 
 export const TERRITORIOS_COLLECTION = 'territorios';
 export const TERRITORIOS_CONTEXT_COLLECTION = 'territorios_contexto';
@@ -39,9 +40,10 @@ export function getTerritorioContextCollectionRef(db) {
 }
 
 export function buildBaseTerritorioDefaults(nome) {
+    const nomeNormalizado = normalizeTerritorioNome(nome);
     return {
         status: TERRITORIO_STATUS.ABERTO,
-        nome,
+        nome: nomeNormalizado,
         quadras_feitas: [],
         notas_quadras: {},
         historico: [],
@@ -56,9 +58,10 @@ export function buildBaseTerritorioDefaults(nome) {
 }
 
 export function buildContextTerritorioDefaults({ idTerritorio, nome, contextoSistema }) {
+    const nomeNormalizado = normalizeTerritorioNome(nome);
     return {
         status: TERRITORIO_STATUS.ABERTO,
-        nome,
+        nome: nomeNormalizado,
         territorioBaseId: getTerritorioBaseId(idTerritorio),
         territorioNumero: idTerritorio,
         contextoId: contextoSistema.contextoAtivoId,
@@ -88,12 +91,13 @@ export function buildTerritorioStateSeed({ contextoId, idTerritorio, nome, conte
 }
 
 export function buildTerritorioStateMergeSeed({ contextoId, idTerritorio, nome, contextoSistema }) {
+    const nomeNormalizado = normalizeTerritorioNome(nome);
     if (isNormalContext(contextoId)) {
-        return { nome };
+        return { nome: nomeNormalizado };
     }
 
     return {
-        nome,
+        nome: nomeNormalizado,
         territorioBaseId: getTerritorioBaseId(idTerritorio),
         territorioNumero: idTerritorio,
         contextoId: contextoSistema.contextoAtivoId,
@@ -106,6 +110,9 @@ export function mergeTerritorioData({ contextoId, nomeFallback, baseData, stateD
     const base = baseData || {};
     const state = stateData || {};
     const notasPermanentes = base.notas_quadras || {};
+    const nomeBase = normalizeTerritorioNome(base.nome);
+    const nomeState = normalizeTerritorioNome(state.nome);
+    const nomeFallbackNormalizado = normalizeTerritorioNome(nomeFallback);
 
     if (isNormalContext(contextoId)) {
         return {
@@ -113,14 +120,13 @@ export function mergeTerritorioData({ contextoId, nomeFallback, baseData, stateD
             quadras_feitas: [],
             historico: [],
             ...base,
-            nome: base.nome || nomeFallback,
+            nome: nomeBase || nomeFallbackNormalizado,
             notas_quadras: notasPermanentes
         };
     }
 
     return {
         status: TERRITORIO_STATUS.ABERTO,
-        nome: state.nome || base.nome || nomeFallback,
         quadras_feitas: [],
         designadoPara: null,
         designadoNome: null,
@@ -131,7 +137,8 @@ export function mergeTerritorioData({ contextoId, nomeFallback, baseData, stateD
         ultimaConclusao: null,
         ultimaAlteracao: null,
         notas_quadras: notasPermanentes,
-        ...state
+        ...state,
+        nome: nomeState || nomeBase || nomeFallbackNormalizado
     };
 }
 

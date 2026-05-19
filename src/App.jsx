@@ -17,6 +17,7 @@ import { buildFeatureIndex, getFeatureBoundsStr, getTerritorioQuadrasCount } fro
 import { useSistema } from './useSistema';
 import { getSistemaTheme, isNormalContext } from './sistema';
 import { getTerritorioContextCollectionRef, getTerritorioProgresso, getTerritorioStateRef } from './territorioContext';
+import { normalizeTerritorioNome } from './territorioNome';
 import { useCoberturaCampanha } from './useCoberturaCampanha';
 import { finalizarTerritorioDesignado } from './territorioActions';
 import { describeOutboxConflict } from './territorioOfflineModel';
@@ -578,6 +579,10 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
           listaCompleta = meusDocs.map((territorioDoc) => {
             const numeroId = territorioDoc.territorioNumero || parseInt(String(territorioDoc.id).replace(/.*t_/, ''));
             const feature = featureMap.get(numeroId);
+            const nome = normalizeTerritorioNome(
+              territorioDoc.nome || feature?.properties?.nome,
+              `Território ${numeroId}`
+            );
             const boundsStr = getFeatureBoundsStr(feature);
             const totalQuadras = getTerritorioQuadrasCount(feature);
             const progresso = getTerritorioProgresso(territorioDoc, totalQuadras);
@@ -613,6 +618,7 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
             return {
               ...territorioDoc,
               numeroId,
+              nome,
               boundsStr,
               dataFormatada,
               dataDesignacaoOrdenacao,

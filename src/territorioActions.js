@@ -26,6 +26,7 @@ import {
 import { getTerritorioNotasCollectionRef } from './territorioNotes';
 import { enviarEventoNotificacaoPeloRelay, relayDisponivel } from './notificationRelay';
 import { isOutboxActionRetryable, TERRITORIO_ACTION_TYPE } from './territorioOfflineModel';
+import { normalizeTerritorioNome } from './territorioNome';
 
 let syncInFlight = null;
 
@@ -215,12 +216,13 @@ export async function enqueueTerritorioAction({
     designacaoId,
     payload = {}
 }) {
+    const nomeNormalizado = normalizeTerritorioNome(territorioNome, `Território ${territorioId}`);
     const contextoMeta = buildContextoMeta(contextoSistema, payload.contextoId);
 
     return putOutboxAction(buildOutboxAction({
         type,
         territorioId,
-        territorioNome,
+        territorioNome: nomeNormalizado,
         userEmail,
         designacaoId,
         payload,
@@ -488,6 +490,7 @@ export async function finalizarTerritorioDesignado({ salvarEstadoTerritorio, dad
         return { ok: false, motivo: 'sem_designacao' };
     }
 
+    const nomeNormalizado = normalizeTerritorioNome(nome);
     const responsavelNome = dadosBanco.designadoNome || 'Dirigente';
     const agora = new Date();
     const contextoSufixo = buildContextoSufixo(contextoSistema);
@@ -500,7 +503,7 @@ export async function finalizarTerritorioDesignado({ salvarEstadoTerritorio, dad
 
     await enviarNotificacaoFinalizacao({
         db,
-        nome,
+        nome: nomeNormalizado,
         responsavelNome,
         contextoSistema,
         agora
