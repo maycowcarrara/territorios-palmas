@@ -1703,12 +1703,10 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                             <h3 className="font-bold text-gray-800 text-sm">{ref.nome}</h3>
                             <button
                                 onClick={() => {
-                                    const appUrl = buildAppLocationUrl(ref.lat, ref.lng, 18);
                                     const mapsUrl = buildGoogleMapsUrl(ref.lat, ref.lng);
                                     const text = buildLocationShareText({
                                         title: 'Ponto de Referência',
                                         territoryName: nome,
-                                        appUrl,
                                         mapsUrl,
                                         extraLine: `Referência: *${ref.nome}*`
                                     });
