@@ -144,7 +144,7 @@ function Login() {
 
   return (
     <div className="flex items-center justify-center h-[100dvh] bg-gray-100">
-      <div className="w-96 bg-white shadow-xl rounded-xl overflow-hidden border border-gray-200 m-4 animate-fade-in">
+      <div className="w-full max-w-sm bg-white shadow-xl rounded-xl overflow-hidden border border-gray-200 m-4 animate-fade-in">
         <div className="p-8 text-center">
           <img
             src={APP_ICON_192}
@@ -1744,7 +1744,7 @@ function Dashboard() {
     }
     return (
       <div className="h-[100dvh] flex items-center justify-center bg-gray-100 p-4">
-        <div className="w-96 bg-white shadow-xl rounded-xl p-6 text-center border border-red-100">
+        <div className="w-full max-w-md bg-white shadow-xl rounded-xl p-6 text-center border border-red-100">
           <h2 className="text-2xl font-bold text-red-600 mb-2">Acesso Restrito</h2>
           <p className="mb-6 text-gray-600">O e-mail <strong>{user.email}</strong> não possui permissão de acesso.</p>
           <button onClick={handleLogout} className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 text-gray-700">Sair</button>

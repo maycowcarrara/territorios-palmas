@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, where, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
 import { useSistema } from './useSistema';
-import { getDefaultSistemaConfig, getSistemaTheme, slugifyCampanha } from './sistema';
+import { getDefaultSistemaConfig, slugifyCampanha } from './sistema';
 import { getTerritorioContextCollectionRef } from './territorioContext';
 import { useUiFeedback } from './uiFeedback';
 import { enviarComunicadoPeloRelay, relayDisponivel } from './notificationRelay';
@@ -11,6 +11,11 @@ import { useOnlineStatus } from './useOnlineStatus';
 
 const ADMIN_OFFLINE_MESSAGE = 'Você está offline. Ações administrativas precisam de conexão para evitar conflito de designações. Conecte-se para continuar.';
 const ADMIN_OFFLINE_ACTION_CLASS = 'disabled:cursor-not-allowed disabled:opacity-50';
+const ADMIN_TABS = [
+    { id: 'usuarios', label: 'Usuários', icon: '👥' },
+    { id: 'campanhas', label: 'Campanhas', icon: '📢' },
+    { id: 'comunicados', label: 'Comunicados', icon: '🔔' }
+];
 
 const AdminPanel = () => {
     const isOnline = useOnlineStatus();
@@ -25,7 +30,6 @@ const AdminPanel = () => {
     const [registrosCampanhaParaExcluir, setRegistrosCampanhaParaExcluir] = useState(0);
     const [excluindoCampanha, setExcluindoCampanha] = useState(false);
     const { config: contextoSistema } = useSistema();
-    const temaSistema = getSistemaTheme(contextoSistema);
     const { notify, confirm } = useUiFeedback();
     const adminActionsDisabled = !isOnline;
 
@@ -49,6 +53,10 @@ const AdminPanel = () => {
     const [comunicadoGeral, setComunicadoGeral] = useState('');
     const [enviandoComunicado, setEnviandoComunicado] = useState(false);
     const [destinoComunicado, setDestinoComunicado] = useState('todos');
+    const [activeTab, setActiveTab] = useState('usuarios');
+    const [userSearch, setUserSearch] = useState('');
+    const [userRoleFilter, setUserRoleFilter] = useState('todos');
+    const [cadastroAberto, setCadastroAberto] = useState(false);
 
     // Estados para EDIÇÃO inline
     const [editandoId, setEditandoId] = useState(null);
@@ -183,6 +191,7 @@ const AdminPanel = () => {
             setNovoEmail('');
             setNovoNome('');
             setNovoWhats('');
+            setCadastroAberto(false);
             notify({
                 title: 'Usuário cadastrado',
                 message: 'Usuário adicionado com sucesso.',
@@ -584,10 +593,43 @@ const AdminPanel = () => {
 
     // --- CONTADORES ---
     const totalUsers = usuarios.length;
-    const totalAdmins = usuarios.filter(u => u.role === 'admin').length;
-    const totalPendentes = usuarios.filter(u => u.role === 'aguardando').length;
-    const totalAprovados = usuarios.filter(u => u.role === 'admin' || u.role === 'comum').length;
+    const totalAdmins = usuarios.filter((u) => u.role === 'admin').length;
+    const usuariosPendentes = usuarios.filter((u) => u.role === 'aguardando');
+    const totalPendentes = usuariosPendentes.length;
+    const totalAprovados = usuarios.filter((u) => u.role === 'admin' || u.role === 'comum').length;
     const totalDestinoComunicado = destinoComunicado === 'admins' ? totalAdmins : totalAprovados;
+    const buscaUsuario = userSearch.trim().toLowerCase();
+    const usuariosFiltrados = usuarios.filter((user) => {
+        const correspondePerfil = userRoleFilter === 'todos' || user.role === userRoleFilter;
+        const conteudoBusca = `${user.nome || ''} ${user.id || ''} ${user.whatsapp || ''}`.toLowerCase();
+        const correspondeBusca = !buscaUsuario || conteudoBusca.includes(buscaUsuario);
+
+        return correspondePerfil && correspondeBusca;
+    });
+    const adminTabs = ADMIN_TABS.map((tab) => {
+        if (tab.id === 'usuarios') {
+            return {
+                ...tab,
+                badge: totalPendentes > 0 ? `${totalPendentes} pend.` : `${totalUsers}`
+            };
+        }
+
+        if (tab.id === 'campanhas') {
+            return {
+                ...tab,
+                badge: contextoSistema.campanhaAtiva ? 'ativa' : `${campanhas.length}`
+            };
+        }
+
+        if (tab.id === 'comunicados') {
+            return {
+                ...tab,
+                badge: `${totalDestinoComunicado}`
+            };
+        }
+
+        return tab;
+    });
     const formatarTelefone = (valor) => {
         return valor
             .replace(/\D/g, '')
@@ -596,602 +638,723 @@ const AdminPanel = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 p-4 font-sans">
-            <div className="max-w-7xl mx-auto">
-                {/* HEADER */}
-                <header className="flex flex-col md:flex-row justify-between items-center gap-4 mb-8">
-                    <div className="text-center md:text-left">
-                        <h1 className="text-3xl font-bold text-gray-800 flex items-center justify-center md:justify-start gap-2">
-                            <span className="bg-blue-600 text-white rounded-lg p-1.5 text-xl">🛡️</span>
-                            Painel Admin
-                        </h1>
-                        <p className="text-gray-500 mt-1 text-sm">Gerencie usuários e permissões do sistema.</p>
+        <div className="min-h-screen bg-slate-50 p-4 font-sans">
+            <div className="mx-auto max-w-7xl">
+                <header className="mb-4 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-center sm:text-left">
+                            <h1 className="text-xl font-black text-slate-900 sm:text-2xl">Painel de Controle</h1>
+                        </div>
+                        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                            <div className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${isOnline ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                                <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                                {isOnline ? 'Online' : 'Offline'}
+                            </div>
+                            <Link to="/app" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-all hover:border-blue-200 hover:text-blue-600 active:scale-[0.99]">
+                                ← Voltar ao Mapa
+                            </Link>
+                        </div>
                     </div>
-                    <Link to="/app" className="px-5 py-2.5 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 shadow-sm hover:bg-gray-50 hover:text-blue-600 transition-all flex items-center gap-2 active:scale-95">
-                        ← Voltar ao Mapa
-                    </Link>
                 </header>
+
                 {!isOnline && (
                     <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-900 shadow-sm">
                         {ADMIN_OFFLINE_MESSAGE}
                     </div>
                 )}
 
-                {/* CARDS DE RESUMO */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
-                        <div>
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Total Dirigentes</p>
-                            <p className="text-3xl font-bold text-gray-700">{totalUsers}</p>
+                <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Dirigentes</p>
+                            <p className="mt-1 text-lg font-black text-slate-800">{totalUsers}</p>
                         </div>
-                        <div className="text-3xl opacity-20">👥</div>
-                    </div>
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
-                        <div>
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Admins</p>
-                            <p className="text-3xl font-bold text-blue-600">{totalAdmins}</p>
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Admins</p>
+                            <p className="mt-1 text-lg font-black text-blue-700">{totalAdmins}</p>
                         </div>
-                        <div className="text-3xl opacity-20">🛡️</div>
-                    </div>
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
-                        <div>
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Pendentes</p>
-                            <p className={`text-3xl font-bold ${totalPendentes > 0 ? 'text-red-500 animate-pulse' : 'text-green-500'}`}>{totalPendentes}</p>
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Pendentes</p>
+                            <p className={`mt-1 text-lg font-black ${totalPendentes > 0 ? 'text-amber-700' : 'text-emerald-600'}`}>{totalPendentes}</p>
                         </div>
-                        <div className="text-3xl opacity-20">⏳</div>
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Modo</p>
+                            <p className="mt-1 truncate text-[13px] font-black text-violet-700">
+                                {contextoSistema.campanhaAtiva ? contextoSistema.contextoAtivoTitulo : 'Pregação normal'}
+                            </p>
+                        </div>
                     </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-8">
-                    <div className={`p-4 border-b border-gray-200 ${temaSistema.panelBg}`}>
-                        <h3 className={`font-bold flex items-center gap-2 ${temaSistema.panelText}`}>
-                            📢 Modo do Sistema
-                        </h3>
-                    </div>
-                    <div className="p-5 space-y-5">
-                        <div className={`rounded-xl border p-4 ${temaSistema.panelBorder} ${temaSistema.panelBg}`}>
-                            <p className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Modo atual</p>
-                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                                <div>
-                                    <p className={`text-xl font-extrabold ${temaSistema.accentText}`}>
-                                        {contextoSistema.campanhaAtiva ? contextoSistema.contextoAtivoTitulo : 'Pregação normal'}
-                                    </p>
-                                    <p className="text-sm text-gray-500">
-                                        {contextoSistema.campanhaAtiva
-                                            ? `Campanha ativa (${contextoSistema.contextoAtivoId})`
-                                            : 'Sem campanha ativa no momento.'}
-                                    </p>
-                                </div>
-                                <div className="flex flex-col gap-2 md:items-end">
-                                    {contextoSistema.campanhaAtiva ? (
-                                        <>
-                                            <button
-                                                type="button"
-                                                onClick={voltarModoNormal}
-                                                disabled={salvandoCampanha || adminActionsDisabled}
-                                                className={`px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                            >
-                                                Desativar Campanha
-                                            </button>
-                                            <p className="text-xs text-gray-500">
-                                                O sistema volta imediatamente para a pregação normal.
-                                            </p>
-                                        </>
-                                    ) : (
-                                        <p className="text-xs text-gray-500 md:text-right">
-                                            Quando precisar, ative uma campanha abaixo.
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
+                <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
+                    <div className="overflow-x-auto">
+                        <div className="flex min-w-max gap-2">
+                            {adminTabs.map((tab) => {
+                                const ativa = activeTab === tab.id;
+
+                                return (
+                                    <button
+                                        key={tab.id}
+                                        id={`tab-${tab.id}`}
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={ativa}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`min-w-[160px] rounded-xl border px-3 py-2 text-left transition-all ${ativa ? 'border-slate-900 bg-slate-900 text-white' : 'border-transparent bg-white text-slate-700 hover:bg-slate-50'}`}
+                                    >
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex items-center gap-3">
+                                                <span className={`flex h-7 w-7 items-center justify-center rounded-lg text-sm ${ativa ? 'bg-white/15' : 'bg-slate-100'}`}>
+                                                    {tab.icon}
+                                                </span>
+                                                <p className="text-xs font-bold">{tab.label}</p>
+                                            </div>
+                                            {tab.badge ? (
+                                                <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] ${ativa ? 'bg-white text-slate-900' : 'bg-slate-100 text-slate-600'}`}>
+                                                    {tab.badge}
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    </button>
+                                );
+                            })}
                         </div>
+                    </div>
+                </div>
 
-                        <form onSubmit={handleCriarCampanha}>
-                            <fieldset disabled={adminActionsDisabled || salvandoCampanha} className={`grid grid-cols-1 lg:grid-cols-[1.4fr_1fr_auto] gap-3 items-end ${adminActionsDisabled ? 'opacity-60' : ''}`}>
-                                <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Título da Campanha</label>
-                                    <input
-                                        type="text"
-                                        placeholder="Ex: Convite da Celebração"
-                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
-                                        value={campanhaTitulo}
-                                        onChange={(e) => setCampanhaTitulo(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Identificador Interno</label>
-                                    <input
-                                        type="text"
-                                        placeholder="ex: celebracao_2026"
-                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-violet-500 focus:border-transparent outline-none transition-all"
-                                        value={campanhaSlug}
-                                        onChange={(e) => setCampanhaSlug(slugifyCampanha(e.target.value))}
-                                    />
-                                </div>
-                                <button
-                                    type="submit"
-                                    disabled={salvandoCampanha || adminActionsDisabled}
-                                    className={`bg-violet-600 hover:bg-violet-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all active:scale-95 ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                >
-                                    {salvandoCampanha ? 'Salvando...' : 'Ativar Campanha'}
-                                </button>
-                            </fieldset>
-                        </form>
-
-                        {campanhas.length > 0 && (
-                            <div>
-                                <p className="text-xs font-bold text-gray-500 uppercase mb-3">Campanhas cadastradas</p>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {campanhas.map((campanha) => {
-                                        const ativa = contextoSistema.contextoAtivoId === campanha.id;
-                                        return (
-                                            <div key={campanha.id} className={`rounded-xl border p-4 ${ativa ? 'border-violet-200 bg-violet-50' : 'border-gray-200 bg-gray-50'}`}>
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div>
-                                                        <p className="font-bold text-gray-800">{campanha.titulo || campanha.id}</p>
-                                                        <p className="text-xs text-gray-400 font-mono mt-1">{campanha.id}</p>
+                {activeTab === 'usuarios' && (
+                    <section role="tabpanel" aria-labelledby="tab-usuarios" className="space-y-6">
+                        <div className={`grid grid-cols-1 gap-6 ${totalPendentes > 0 ? 'xl:grid-cols-[0.95fr_1.05fr]' : ''}`}>
+                            {totalPendentes > 0 && (
+                                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <h2 className="text-xl font-black text-slate-900">{totalPendentes} pendência(s)</h2>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setUserRoleFilter('aguardando');
+                                                setUserSearch('');
+                                            }}
+                                            className="rounded-xl border border-amber-200 bg-white px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-amber-700 transition-all hover:bg-amber-50"
+                                        >
+                                            Ver só pendentes
+                                        </button>
+                                    </div>
+                                    <div className="mt-5 space-y-3">
+                                        {usuariosPendentes.slice(0, 3).map((user) => (
+                                            <div key={user.id} className="rounded-2xl border border-white bg-white/90 p-3.5 shadow-sm">
+                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-bold text-slate-800">{user.nome || 'Sem nome'}</p>
+                                                        <p className="mt-1 truncate text-xs font-mono text-slate-400">{user.id}</p>
                                                     </div>
-                                                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${ativa ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 border border-gray-200'}`}>
-                                                        {ativa ? 'ATIVA' : 'SALVA'}
-                                                    </span>
-                                                </div>
-                                                <div className="mt-4 grid grid-cols-1 gap-2">
                                                     <button
                                                         type="button"
-                                                        onClick={() => ativarCampanha({ id: campanha.id, titulo: campanha.titulo || campanha.id })}
-                                                        disabled={salvandoCampanha || ativa || adminActionsDisabled}
-                                                        className={`w-full rounded-lg border border-violet-200 bg-white py-2 text-sm font-bold text-violet-700 hover:bg-violet-50 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                        onClick={() => mudarRole(user, 'comum')}
+                                                        disabled={adminActionsDisabled}
+                                                        className={`rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-emerald-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                     >
-                                                        {ativa ? 'Campanha Atual' : 'Reativar'}
+                                                        Aprovar agora
                                                     </button>
-                                                    {ativa && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={voltarModoNormal}
-                                                            disabled={salvandoCampanha || adminActionsDisabled}
-                                                            className={`w-full rounded-lg bg-red-600 py-2 text-sm font-bold text-white hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                                        >
-                                                            Desativar Agora
-                                                        </button>
-                                                    )}
-                                                    {!ativa && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => abrirModalExclusaoCampanha(campanha)}
-                                                            disabled={salvandoCampanha || excluindoCampanha || adminActionsDisabled}
-                                                            className={`w-full rounded-lg border border-red-200 bg-white py-2 text-sm font-bold text-red-700 hover:bg-red-50 ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                                        >
-                                                            Excluir Campanha
-                                                        </button>
-                                                    )}
                                                 </div>
-                                                {ativa && (
-                                                    <p className="mt-3 text-xs text-violet-700">
-                                                        Para excluir esta campanha, desative primeiro o modo campanha.
-                                                    </p>
-                                                )}
                                             </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-8">
-                    <div className="p-4 bg-amber-50 border-b border-amber-100">
-                        <h3 className="font-bold text-amber-900 flex items-center gap-2">
-                            🔔 Comunicado Geral
-                        </h3>
-                    </div>
-                    <div className="p-5">
-                        <form onSubmit={enviarComunicadoGeral}>
-                            <fieldset disabled={adminActionsDisabled || enviandoComunicado} className={`space-y-4 ${adminActionsDisabled ? 'opacity-60' : ''}`}>
-                                <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-2 block">Destino</label>
-                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                        <label className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${destinoComunicado === 'todos' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                                            <input
-                                                type="radio"
-                                                name="destino-comunicado"
-                                                value="todos"
-                                                checked={destinoComunicado === 'todos'}
-                                                onChange={(e) => setDestinoComunicado(e.target.value)}
-                                            />
-                                            <span className="text-sm font-semibold text-gray-700">Todos os aprovados</span>
-                                        </label>
-                                        <label className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-all ${destinoComunicado === 'admins' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                                            <input
-                                                type="radio"
-                                                name="destino-comunicado"
-                                                value="admins"
-                                                checked={destinoComunicado === 'admins'}
-                                                onChange={(e) => setDestinoComunicado(e.target.value)}
-                                            />
-                                            <span className="text-sm font-semibold text-gray-700">Somente admins</span>
-                                        </label>
+                                        ))}
                                     </div>
                                 </div>
-                                <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Mensagem para todos os usuários aprovados</label>
-                                    <textarea
-                                        rows={4}
-                                        placeholder="Ex: O app foi atualizado. Fechem e abram novamente para carregar a nova versão."
-                                        className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-amber-400 focus:border-transparent outline-none transition-all resize-y"
-                                        value={comunicadoGeral}
-                                        onChange={(e) => setComunicadoGeral(e.target.value)}
-                                    />
-                                </div>
-                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                                    <p className="text-sm text-gray-500">
-                                        Envia uma notificação interna para <span className="font-bold text-gray-700">{totalDestinoComunicado}</span> {destinoComunicado === 'admins' ? 'admin(s)' : 'usuário(s) aprovados'}.
-                                        {relayDisponivel()
-                                            ? ' Quem tiver o app com FCM ativo também pode receber push mesmo com o app fechado.'
-                                            : ' Quem estiver com o app aberto recebe na hora; quem abrir depois vê no sininho.'}
-                                    </p>
+                            )}
+
+                            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                                <div className="flex items-center justify-between gap-3">
+                                    <h2 className="text-xl font-black text-slate-900">Cadastrar novo usuário</h2>
                                     <button
-                                        type="submit"
-                                        disabled={enviandoComunicado || totalDestinoComunicado === 0 || adminActionsDisabled}
-                                        className={`bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all active:scale-95 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                        type="button"
+                                        onClick={() => setCadastroAberto((prev) => !prev)}
+                                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-lg font-bold text-slate-600 transition-all hover:bg-slate-100"
+                                        aria-label={cadastroAberto ? 'Recolher cadastro' : 'Abrir cadastro'}
                                     >
-                                        {enviandoComunicado ? 'Enviando...' : 'Enviar Comunicado'}
+                                        <span aria-hidden="true">{cadastroAberto ? '−' : '+'}</span>
                                     </button>
                                 </div>
-                            </fieldset>
-                        </form>
-                    </div>
-                </div>
-
-                {/* FORMULÁRIO DE CADASTRO */}
-                <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-8">
-                    <div className="p-4 bg-gray-50 border-b border-gray-200">
-                        <h3 className="font-bold text-gray-700 flex items-center gap-2">
-                            ✨ Cadastrar Novo Usuário
-                        </h3>
-                    </div>
-                    <div className="p-5">
-                        <form onSubmit={handleAdicionar}>
-                            <fieldset disabled={adminActionsDisabled || loadingAdd} className={`flex flex-col md:flex-row gap-3 items-end ${adminActionsDisabled ? 'opacity-60' : ''}`}>
-                                <div className="flex-1 w-full">
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Nome Completo</label>
-                                    <input
-                                        type="text"
-                                        placeholder="Ex: João Silva"
-                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                                        value={novoNome}
-                                        onChange={e => setNovoNome(e.target.value)}
-                                    />
-                                </div>
-                                <div className="flex-1 w-full">
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">E-mail (Google)</label>
-                                    <input
-                                        type="email"
-                                        placeholder="Ex: joao@gmail.com"
-                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                                        value={novoEmail}
-                                        onChange={e => setNovoEmail(e.target.value)}
-                                        required
-                                    />
-                                </div>
-                                <div className="w-full md:w-48">
-                                    <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">WhatsApp</label>
-                                    <input
-                                        type="text"
-                                        placeholder="(46) 99999-9999"
-                                        className="w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                                        value={novoWhats}
-                                        maxLength={15}
-                                        onChange={e => setNovoWhats(formatarTelefone(e.target.value))}
-                                    />
-                                </div>
-                                <button
-                                    type="submit"
-                                    disabled={loadingAdd || adminActionsDisabled}
-                                    className={`w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                >
-                                    {loadingAdd ? 'Salvando...' : '+ Adicionar'}
-                                </button>
-                            </fieldset>
-                        </form>
-                    </div>
-                </div>
-
-                {/* --- MODO MOBILE: CARDS (RESPONSIVO) --- */}
-                <div className="md:hidden space-y-4">
-                    {usuarios.map((user) => (
-                        <div key={user.id} className={`bg-white p-4 rounded-xl shadow-sm border border-gray-200 ${editandoId === user.id ? 'ring-2 ring-blue-100 bg-blue-50/20' : ''}`}>
-                            
-                            {/* Cabeçalho do Card */}
-                            <div className="flex justify-between items-start mb-3">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center font-bold text-sm border border-gray-200">
-                                        {(user.nome || user.id || '?')[0].toUpperCase()}
-                                    </div>
-                                    <div>
-                                        {editandoId === user.id ? (
-                                            <input
-                                                type="text"
-                                                value={dadosEditados.nome || ''}
-                                                onChange={e => handleEditChange('nome', e.target.value)}
-                                                className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
-                                                placeholder="Nome"
-                                                disabled={adminActionsDisabled}
-                                            />
-                                        ) : (
-                                            <h4 className="font-bold text-gray-800 text-base">{user.nome || 'Sem Nome'}</h4>
-                                        )}
-                                        <p className="text-xs text-gray-500 font-mono truncate max-w-[150px]">{user.id}</p>
-                                    </div>
-                                </div>
-                                
-                                {/* Badge de Role */}
-                                <div>
-                                    {user.role === 'admin' ? (
-                                        <span className="px-2 py-1 rounded text-[10px] font-bold bg-purple-100 text-purple-700 border border-purple-200">ADMIN</span>
-                                    ) : user.role === 'aguardando' ? (
-                                        <span className="px-2 py-1 rounded text-[10px] font-bold bg-red-100 text-red-700 border border-red-200 animate-pulse">PENDENTE</span>
-                                    ) : (
-                                        <span className="px-2 py-1 rounded text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-100">DIRIGENTE</span>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Corpo do Card (Whatsapp) */}
-                            <div className="mb-4 pl-[3.25rem]">
-                                {editandoId === user.id ? (
-                                    <input
-                                        type="text"
-                                        value={dadosEditados.whatsapp || ''}
-                                        onChange={e => handleEditChange('whatsapp', e.target.value)}
-                                        className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none bg-white"
-                                        placeholder="WhatsApp"
-                                        disabled={adminActionsDisabled}
-                                    />
-                                ) : (
-                                    user.whatsapp ? (
-                                        <a href={`https://wa.me/${user.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm text-green-700 font-medium">
-                                            <span className="text-xs">🟢</span> {user.whatsapp}
-                                        </a>
-                                    ) : (
-                                        <span className="text-gray-300 text-sm italic">Sem WhatsApp</span>
-                                    )
-                                )}
-                            </div>
-
-                            {/* Botões de Ação Mobile */}
-                            <div className="flex gap-2 border-t border-gray-100 pt-3">
-                                {editandoId === user.id ? (
-                                    <>
-                                        <button
-                                            onClick={salvarEdicao}
-                                            disabled={adminActionsDisabled}
-                                            className={`flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-sm ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                        >
-                                            Salvar
-                                        </button>
-                                        <button onClick={cancelarEdicao} className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-bold text-sm">Cancelar</button>
-                                    </>
-                                ) : (
-                                    <>
-                                        {user.role === 'aguardando' ? (
-                                            <button
-                                                onClick={() => mudarRole(user, 'comum')}
-                                                disabled={adminActionsDisabled}
-                                                className={`flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-sm shadow-sm active:scale-95 transition-transform ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                            >
-                                                Aprovar Acesso
-                                            </button>
-                                        ) : (
-                                            <>
+                                {cadastroAberto ? (
+                                    <form onSubmit={handleAdicionar} className="mt-5">
+                                        <fieldset disabled={adminActionsDisabled || loadingAdd} className={`grid grid-cols-1 gap-4 md:grid-cols-2 ${adminActionsDisabled ? 'opacity-60' : ''}`}>
+                                            <div className="md:col-span-2">
+                                                <label className="mb-1 block text-xs font-bold uppercase text-slate-500">Nome completo</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Ex: João Silva"
+                                                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                                    value={novoNome}
+                                                    onChange={(e) => setNovoNome(e.target.value)}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="mb-1 block text-xs font-bold uppercase text-slate-500">E-mail (Google)</label>
+                                                <input
+                                                    type="email"
+                                                    placeholder="Ex: joao@gmail.com"
+                                                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                                    value={novoEmail}
+                                                    onChange={(e) => setNovoEmail(e.target.value)}
+                                                    required
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="mb-1 block text-xs font-bold uppercase text-slate-500">WhatsApp</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="(46) 99999-9999"
+                                                    className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                                    value={novoWhats}
+                                                    maxLength={15}
+                                                    onChange={(e) => setNovoWhats(formatarTelefone(e.target.value))}
+                                                />
+                                            </div>
+                                            <div className="md:col-span-2">
                                                 <button
-                                                    onClick={() => iniciarEdicao(user)}
-                                                    disabled={adminActionsDisabled}
-                                                    className={`p-2 bg-gray-50 text-blue-600 rounded-lg border border-gray-200 flex-1 flex justify-center items-center ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                    type="submit"
+                                                    disabled={loadingAdd || adminActionsDisabled}
+                                                    className={`inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-md transition-all hover:bg-blue-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                 >
-                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                                                    {loadingAdd ? 'Salvando...' : '+ Adicionar usuário'}
                                                 </button>
-
-                                                {/* BOTÃO PROMOVER / REBAIXAR - NOVO ÍCONE */}
-                                                <button 
-                                                    onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')} 
-                                                    disabled={adminActionsDisabled}
-                                                    className={`p-2 rounded-lg border flex-1 flex justify-center items-center transition-colors ${user.role === 'admin' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-yellow-50 text-yellow-600 border-yellow-100'} ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                                >
-                                                    {user.role === 'admin' ? (
-                                                        // ÍCONE DE USUÁRIO (Rebaixar)
-                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                                            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                                                        </svg>
-                                                    ) : (
-                                                        // ÍCONE DE ESTRELA (Promover a Admin)
-                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                                        </svg>
-                                                    )}
-                                                </button>
-                                            </>
-                                        )}
-                                        <button
-                                            onClick={() => remover(user.id)}
-                                            disabled={adminActionsDisabled}
-                                            className={`p-2 bg-red-50 text-red-600 rounded-lg border border-red-100 flex-1 flex justify-center items-center ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-                                        </button>
-                                    </>
-                                )}
+                                            </div>
+                                        </fieldset>
+                                    </form>
+                                ) : null}
                             </div>
                         </div>
-                    ))}
-                    {usuarios.length === 0 && (
-                        <div className="p-8 text-center text-gray-400 italic bg-white rounded-xl border border-gray-200">Nenhum usuário encontrado.</div>
-                    )}
-                </div>
 
-                {/* --- MODO DESKTOP: TABELA (VISÍVEL APENAS EM TELAS GRANDES) --- */}
-                <div className="hidden md:block bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200">
-                                    <th className="px-6 py-4 font-bold">Usuário / E-mail</th>
-                                    <th className="px-6 py-4 font-bold">WhatsApp</th>
-                                    <th className="px-6 py-4 font-bold text-center">Permissão</th>
-                                    <th className="px-6 py-4 font-bold text-right">Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {usuarios.map((user) => (
-                                    <tr key={user.id} className={`hover:bg-blue-50/30 transition-colors ${editandoId === user.id ? 'bg-yellow-50' : ''}`}>
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                                <div>
+                                    <h2 className="text-xl font-black text-slate-900">Lista de usuários</h2>
+                                </div>
+                                <div className="w-full max-w-md">
+                                    <div>
+                                        <label className="mb-1 block text-xs font-bold uppercase text-slate-500">Buscar usuário</label>
+                                        <input
+                                            type="text"
+                                            value={userSearch}
+                                            onChange={(e) => setUserSearch(e.target.value)}
+                                            placeholder="Nome, e-mail ou telefone"
+                                            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
 
-                                        {/* COLUNA NOME/EMAIL */}
-                                        <td className="px-6 py-4">
-                                            {editandoId === user.id ? (
-                                                <div className="flex flex-col gap-1">
-                                                    <input
-                                                        type="text"
-                                                        value={dadosEditados.nome || ''}
-                                                        onChange={e => handleEditChange('nome', e.target.value)}
-                                                        className="px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
-                                                        placeholder="Nome"
-                                                        disabled={adminActionsDisabled}
-                                                    />
-                                                    <span className="text-xs text-gray-400 font-mono pl-1">{user.id} (Fixo)</span>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                                {[
+                                    { value: 'todos', label: 'Todos' },
+                                    { value: 'aguardando', label: 'Pendentes' },
+                                    { value: 'comum', label: 'Dirigentes' },
+                                    { value: 'admin', label: 'Admins' }
+                                ].map((option) => {
+                                    const ativa = userRoleFilter === option.value;
+
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setUserRoleFilter(option.value)}
+                                            className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-all ${ativa ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+                                        >
+                                            {option.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                                <p className="text-sm text-slate-600">
+                                    Exibindo <span className="font-bold text-slate-800">{usuariosFiltrados.length}</span> de <span className="font-bold text-slate-800">{totalUsers}</span> usuário(s).
+                                </p>
+                                {(userSearch || userRoleFilter !== 'todos') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setUserSearch('');
+                                            setUserRoleFilter('todos');
+                                        }}
+                                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition-all hover:bg-slate-100"
+                                    >
+                                        Limpar filtros
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="mt-6 space-y-4 md:hidden">
+                                {usuariosFiltrados.map((user) => (
+                                    <div key={user.id} className={`rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm ${editandoId === user.id ? 'ring-2 ring-blue-100 bg-blue-50/20' : ''}`}>
+                                        <div className="mb-3 flex items-start justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-sm font-bold text-slate-500">
+                                                    {(user.nome || user.id || '?')[0].toUpperCase()}
                                                 </div>
-                                            ) : (
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 text-gray-500 flex items-center justify-center font-bold text-sm border border-gray-200 shadow-sm">
-                                                        {(user.nome || user.id || '?')[0].toUpperCase()}
-                                                    </div>
-                                                    <div>
-                                                        <div className="font-bold text-gray-800">{user.nome || 'Sem Nome'}</div>
-                                                        <div className="text-xs text-gray-400 font-mono">{user.id}</div>
-                                                    </div>
+                                                <div>
+                                                    {editandoId === user.id ? (
+                                                        <input
+                                                            type="text"
+                                                            value={dadosEditados.nome || ''}
+                                                            onChange={(e) => handleEditChange('nome', e.target.value)}
+                                                            className="w-full rounded-lg border border-blue-300 bg-white px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                                            placeholder="Nome"
+                                                            disabled={adminActionsDisabled}
+                                                        />
+                                                    ) : (
+                                                        <h4 className="text-sm font-bold text-slate-800">{user.nome || 'Sem Nome'}</h4>
+                                                    )}
+                                                    <p className="max-w-[170px] truncate text-xs font-mono text-slate-400">{user.id}</p>
                                                 </div>
-                                            )}
-                                        </td>
+                                            </div>
+                                            <div>
+                                                {user.role === 'admin' ? (
+                                                    <span className="rounded-full border border-purple-200 bg-purple-100 px-2 py-1 text-[10px] font-bold text-purple-700">ADMIN</span>
+                                                ) : user.role === 'aguardando' ? (
+                                                    <span className="rounded-full border border-red-200 bg-red-100 px-2 py-1 text-[10px] font-bold text-red-700">PENDENTE</span>
+                                                ) : (
+                                                    <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-600">DIRIGENTE</span>
+                                                )}
+                                            </div>
+                                        </div>
 
-                                        {/* COLUNA WHATSAPP */}
-                                        <td className="px-6 py-4">
+                                        <div className="mb-4 pl-[3.25rem]">
                                             {editandoId === user.id ? (
                                                 <input
                                                     type="text"
                                                     value={dadosEditados.whatsapp || ''}
-                                                    onChange={e => handleEditChange('whatsapp', e.target.value)}
-                                                    className="w-32 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                                                    onChange={(e) => handleEditChange('whatsapp', e.target.value)}
+                                                    className="w-full rounded-lg border border-blue-300 bg-white px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
                                                     placeholder="WhatsApp"
                                                     disabled={adminActionsDisabled}
                                                 />
+                                            ) : user.whatsapp ? (
+                                                <a href={`https://wa.me/${user.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm font-medium text-green-700">
+                                                    <span className="text-xs">🟢</span> {user.whatsapp}
+                                                </a>
                                             ) : (
-                                                user.whatsapp ? (
-                                                    <a href={`https://wa.me/${user.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-50 text-green-700 text-sm font-medium hover:bg-green-100 transition-colors border border-green-100">
-                                                        <span className="text-xs">🟢</span> {user.whatsapp}
-                                                    </a>
-                                                ) : (
-                                                    <span className="text-gray-300 text-sm italic">--</span>
-                                                )
+                                                <span className="text-sm italic text-slate-300">Sem WhatsApp</span>
                                             )}
-                                        </td>
+                                        </div>
 
-                                        {/* COLUNA ROLE (PERMISSÃO) */}
-                                        <td className="px-6 py-4 text-center">
-                                            {user.role === 'admin' ? (
-                                                <span className="px-3 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200 inline-flex items-center gap-1">
-                                                    🛡️ Admin
-                                                </span>
-                                            ) : user.role === 'aguardando' ? (
-                                                <span className="px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700 border border-red-200 inline-flex items-center gap-1 animate-pulse">
-                                                    ⏳ Pendente
-                                                </span>
+                                        <div className="flex gap-2 border-t border-slate-100 pt-3">
+                                            {editandoId === user.id ? (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        onClick={salvarEdicao}
+                                                        disabled={adminActionsDisabled}
+                                                        className={`flex-1 rounded-xl bg-green-600 py-2 text-sm font-bold text-white ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                    >
+                                                        Salvar
+                                                    </button>
+                                                    <button type="button" onClick={cancelarEdicao} className="flex-1 rounded-xl bg-slate-200 py-2 text-sm font-bold text-slate-700">Cancelar</button>
+                                                </>
                                             ) : (
-                                                <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-600 border border-blue-100 inline-flex items-center gap-1">
-                                                    👤 Dirigente
-                                                </span>
-                                            )}
-                                        </td>
-
-                                        {/* COLUNA AÇÕES */}
-                                        <td className="px-6 py-4 text-right">
-                                            <div className="flex justify-end items-center gap-2">
-
-                                                {/* MODO EDIÇÃO */}
-                                                {editandoId === user.id ? (
-                                                    <>
+                                                <>
+                                                    {user.role === 'aguardando' ? (
                                                         <button
-                                                            onClick={salvarEdicao}
+                                                            type="button"
+                                                            onClick={() => mudarRole(user, 'comum')}
                                                             disabled={adminActionsDisabled}
-                                                            className={`p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                                            title="Salvar"
+                                                            className={`flex-1 rounded-xl bg-green-600 py-2 text-sm font-bold text-white shadow-sm transition-transform active:scale-95 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                         >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                                                            Aprovar acesso
                                                         </button>
-                                                        <button onClick={cancelarEdicao} className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors" title="Cancelar">
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                                                        </button>
-                                                    </>
-                                                ) : (
-                                                    /* MODO VISUALIZAÇÃO */
-                                                    <>
-                                                        {user.role === 'aguardando' ? (
+                                                    ) : (
+                                                        <>
                                                             <button
-                                                                onClick={() => mudarRole(user, 'comum')}
-                                                                disabled={adminActionsDisabled}
-                                                                className={`px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                                            >
-                                                                Aprovar
-                                                            </button>
-                                                        ) : (
-                                                            <button
+                                                                type="button"
                                                                 onClick={() => iniciarEdicao(user)}
                                                                 disabled={adminActionsDisabled}
-                                                                className={`p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                                                title="Editar Dados"
+                                                                className={`flex flex-1 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2 text-blue-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
                                                             >
-                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
                                                             </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')}
+                                                                disabled={adminActionsDisabled}
+                                                                className={`flex flex-1 items-center justify-center rounded-xl border p-2 transition-colors ${user.role === 'admin' ? 'border-red-100 bg-red-50 text-red-600' : 'border-yellow-100 bg-yellow-50 text-yellow-600'} ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                            >
+                                                                {user.role === 'admin' ? (
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                                        <path fillRule="evenodd" d="M10 2.25a.75.75 0 0 1 .75.75v9.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V3a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" />
+                                                                        <path d="M5.5 15.25a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5h-9Z" />
+                                                                    </svg>
+                                                                ) : (
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                                        <path fillRule="evenodd" d="M10 17.75a.75.75 0 0 1-.75-.75V7.81L7.03 10.03a.75.75 0 1 1-1.06-1.06l3.5-3.5a.75.75 0 0 1 1.06 0l3.5 3.5a.75.75 0 1 1-1.06 1.06l-2.22-2.22V17a.75.75 0 0 1-.75.75Z" clipRule="evenodd" />
+                                                                        <path d="M5.5 3.25a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5h-9Z" />
+                                                                    </svg>
+                                                                )}
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => remover(user.id)}
+                                                        disabled={adminActionsDisabled}
+                                                        className={`flex flex-1 items-center justify-center rounded-xl border border-red-100 bg-red-50 p-2 text-red-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                                {usuariosFiltrados.length === 0 && (
+                                    <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-slate-400">
+                                        Nenhum usuário encontrado com os filtros atuais.
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="mt-6 hidden overflow-hidden rounded-2xl border border-slate-200 md:block">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full border-collapse text-left">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+                                                <th className="px-6 py-4 font-bold">Usuário / E-mail</th>
+                                                <th className="px-6 py-4 font-bold">WhatsApp</th>
+                                                <th className="px-6 py-4 text-center font-bold">Permissão</th>
+                                                <th className="px-6 py-4 text-right font-bold">Ações</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 bg-white">
+                                            {usuariosFiltrados.map((user) => (
+                                                <tr key={user.id} className={`transition-colors hover:bg-blue-50/30 ${editandoId === user.id ? 'bg-yellow-50' : ''}`}>
+                                                    <td className="px-6 py-4">
+                                                        {editandoId === user.id ? (
+                                                            <div className="flex flex-col gap-1">
+                                                                <input
+                                                                    type="text"
+                                                                    value={dadosEditados.nome || ''}
+                                                                    onChange={(e) => handleEditChange('nome', e.target.value)}
+                                                                    className="rounded-lg border border-blue-300 px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                                                    placeholder="Nome"
+                                                                    disabled={adminActionsDisabled}
+                                                                />
+                                                                <span className="pl-1 text-xs font-mono text-slate-400">{user.id} (fixo)</span>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-gradient-to-br from-slate-100 to-slate-200 text-sm font-bold text-slate-500 shadow-sm">
+                                                                    {(user.nome || user.id || '?')[0].toUpperCase()}
+                                                                </div>
+                                                                <div>
+                                                                    <div className="font-bold text-slate-800">{user.nome || 'Sem Nome'}</div>
+                                                                    <div className="text-xs font-mono text-slate-400">{user.id}</div>
+                                                                </div>
+                                                            </div>
                                                         )}
-
-                                                        <button
-                                                            onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')}
-                                                            disabled={adminActionsDisabled}
-                                                            className={`p-2 rounded-lg transition-colors ${user.role === 'admin' ? 'text-purple-400 hover:text-red-600 hover:bg-red-50' : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'} ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                                            title={user.role === 'admin' ? "Remover Admin (Voltar a Dirigente)" : "Promover a Admin"}
-                                                        >
-                                                            {user.role === 'admin' ? (
-                                                                // ÍCONE DE USUÁRIO (REBAIXAR)
-                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                                                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                                                                </svg>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {editandoId === user.id ? (
+                                                            <input
+                                                                type="text"
+                                                                value={dadosEditados.whatsapp || ''}
+                                                                onChange={(e) => handleEditChange('whatsapp', e.target.value)}
+                                                                className="w-36 rounded-lg border border-blue-300 px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
+                                                                placeholder="WhatsApp"
+                                                                disabled={adminActionsDisabled}
+                                                            />
+                                                        ) : user.whatsapp ? (
+                                                            <a href={`https://wa.me/${user.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-green-100 bg-green-50 px-2.5 py-1 text-sm font-medium text-green-700 transition-colors hover:bg-green-100">
+                                                                <span className="text-xs">🟢</span> {user.whatsapp}
+                                                            </a>
+                                                        ) : (
+                                                            <span className="text-sm italic text-slate-300">--</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        {user.role === 'admin' ? (
+                                                            <span className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-purple-100 px-3 py-1 text-xs font-bold text-purple-700">
+                                                                🛡️ Admin
+                                                            </span>
+                                                        ) : user.role === 'aguardando' ? (
+                                                            <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-100 px-3 py-1 text-xs font-bold text-red-700">
+                                                                ⏳ Pendente
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600">
+                                                                👤 Dirigente
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-right">
+                                                        <div className="flex items-center justify-end gap-2">
+                                                            {editandoId === user.id ? (
+                                                                <>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={salvarEdicao}
+                                                                        disabled={adminActionsDisabled}
+                                                                        className={`rounded-lg bg-green-100 p-2 text-green-700 transition-colors hover:bg-green-200 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                        title="Salvar"
+                                                                    >
+                                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                                                                    </button>
+                                                                    <button type="button" onClick={cancelarEdicao} className="rounded-lg bg-red-100 p-2 text-red-700 transition-colors hover:bg-red-200" title="Cancelar">
+                                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                                                    </button>
+                                                                </>
                                                             ) : (
-                                                                // ÍCONE DE ESTRELA (PROMOVER)
-                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                                                </svg>
-                                                            )}
-                                                        </button>
+                                                                <>
+                                                                    {user.role === 'aguardando' ? (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => mudarRole(user, 'comum')}
+                                                                            disabled={adminActionsDisabled}
+                                                                            className={`rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all hover:bg-green-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                        >
+                                                                            Aprovar
+                                                                        </button>
+                                                                    ) : (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => iniciarEdicao(user)}
+                                                                            disabled={adminActionsDisabled}
+                                                                            className={`rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                            title="Editar dados"
+                                                                        >
+                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                                                                        </button>
+                                                                    )}
 
-                                                        <button
-                                                            onClick={() => remover(user.id)}
-                                                            disabled={adminActionsDisabled}
-                                                            className={`p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors ${ADMIN_OFFLINE_ACTION_CLASS}`}
-                                                            title="Remover Usuário"
-                                                        >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-                                                        </button>
-                                                    </>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')}
+                                                                        disabled={adminActionsDisabled}
+                                                                        className={`rounded-lg p-2 transition-colors ${user.role === 'admin' ? 'text-purple-400 hover:bg-red-50 hover:text-red-600' : 'text-slate-400 hover:bg-yellow-50 hover:text-yellow-600'} ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                        title={user.role === 'admin' ? 'Remover admin' : 'Promover a admin'}
+                                                                    >
+                                                                        {user.role === 'admin' ? (
+                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                                                <path fillRule="evenodd" d="M10 2.25a.75.75 0 0 1 .75.75v9.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V3a.75.75 0 0 1 .75-.75Z" clipRule="evenodd" />
+                                                                                <path d="M5.5 15.25a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5h-9Z" />
+                                                                            </svg>
+                                                                        ) : (
+                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                                                                <path fillRule="evenodd" d="M10 17.75a.75.75 0 0 1-.75-.75V7.81L7.03 10.03a.75.75 0 1 1-1.06-1.06l3.5-3.5a.75.75 0 0 1 1.06 0l3.5 3.5a.75.75 0 1 1-1.06 1.06l-2.22-2.22V17a.75.75 0 0 1-.75.75Z" clipRule="evenodd" />
+                                                                                <path d="M5.5 3.25a.75.75 0 0 0 0 1.5h9a.75.75 0 0 0 0-1.5h-9Z" />
+                                                                            </svg>
+                                                                        )}
+                                                                    </button>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => remover(user.id)}
+                                                                        disabled={adminActionsDisabled}
+                                                                        className={`rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                        title="Remover usuário"
+                                                                    >
+                                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {usuariosFiltrados.length === 0 && (
+                                    <div className="p-8 text-center italic text-slate-400">Nenhum usuário encontrado com os filtros atuais.</div>
+                                )}
+                            </div>
+                        </div>
+                    </section>
+                )}
+
+                {activeTab === 'campanhas' && (
+                    <section role="tabpanel" aria-labelledby="tab-campanhas" className="space-y-6">
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <h2 className="text-xl font-black text-slate-900">Campanhas</h2>
+                                    <p className="mt-1 text-sm text-slate-500">
+                                        {contextoSistema.campanhaAtiva
+                                            ? `${contextoSistema.contextoAtivoTitulo} (${contextoSistema.contextoAtivoId})`
+                                            : 'Pregação normal'}
+                                    </p>
+                                </div>
+                                {contextoSistema.campanhaAtiva ? (
+                                    <button
+                                        type="button"
+                                        onClick={voltarModoNormal}
+                                        disabled={salvandoCampanha || adminActionsDisabled}
+                                        className={`rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                    >
+                                        Desativar campanha
+                                    </button>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <h3 className="text-lg font-black text-slate-900">Nova campanha</h3>
+                            <form onSubmit={handleCriarCampanha} className="mt-4">
+                                <fieldset disabled={adminActionsDisabled || salvandoCampanha} className={`grid grid-cols-1 items-end gap-3 lg:grid-cols-[1.4fr_1fr_auto] ${adminActionsDisabled ? 'opacity-60' : ''}`}>
+                                    <div>
+                                        <label className="mb-1 block text-xs font-bold uppercase text-slate-500">Título da campanha</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Ex: Convite da Celebração"
+                                            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                                            value={campanhaTitulo}
+                                            onChange={(e) => setCampanhaTitulo(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="mb-1 block text-xs font-bold uppercase text-slate-500">Identificador interno</label>
+                                        <input
+                                            type="text"
+                                            placeholder="ex: celebracao_2026"
+                                            className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                                            value={campanhaSlug}
+                                            onChange={(e) => setCampanhaSlug(slugifyCampanha(e.target.value))}
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={salvandoCampanha || adminActionsDisabled}
+                                        className={`rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white transition-all hover:bg-violet-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                    >
+                                        {salvandoCampanha ? 'Salvando...' : 'Ativar'}
+                                    </button>
+                                </fieldset>
+                            </form>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                                <h3 className="text-lg font-black text-slate-900">Campanhas salvas</h3>
+                                <p className="text-sm text-slate-500">{campanhas.length} campanha(s)</p>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                {campanhas.length > 0 ? campanhas.map((campanha) => {
+                                    const ativa = contextoSistema.contextoAtivoId === campanha.id;
+
+                                    return (
+                                        <div key={campanha.id} className={`rounded-2xl border p-3.5 ${ativa ? 'border-violet-200 bg-violet-50' : 'border-slate-200 bg-slate-50'}`}>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-sm font-bold text-slate-800">{campanha.titulo || campanha.id}</p>
+                                                    <p className="mt-1 text-xs font-mono text-slate-400">{campanha.id}</p>
+                                                </div>
+                                                <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${ativa ? 'bg-violet-600 text-white' : 'border border-slate-200 bg-white text-slate-500'}`}>
+                                                    {ativa ? 'ATIVA' : 'SALVA'}
+                                                </span>
+                                            </div>
+                                            <div className="mt-4 grid gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => ativarCampanha({ id: campanha.id, titulo: campanha.titulo || campanha.id })}
+                                                    disabled={salvandoCampanha || ativa || adminActionsDisabled}
+                                                    className={`w-full rounded-xl border border-violet-200 bg-white py-2 text-sm font-bold text-violet-700 hover:bg-violet-50 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                >
+                                                    {ativa ? 'Campanha atual' : 'Reativar'}
+                                                </button>
+                                                {ativa && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={voltarModoNormal}
+                                                        disabled={salvandoCampanha || adminActionsDisabled}
+                                                        className={`w-full rounded-xl bg-red-600 py-2 text-sm font-bold text-white hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                    >
+                                                        Desativar agora
+                                                    </button>
+                                                )}
+                                                {!ativa && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => abrirModalExclusaoCampanha(campanha)}
+                                                        disabled={salvandoCampanha || excluindoCampanha || adminActionsDisabled}
+                                                        className={`w-full rounded-xl border border-red-200 bg-white py-2 text-sm font-bold text-red-700 hover:bg-red-50 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                    >
+                                                        Excluir campanha
+                                                    </button>
                                                 )}
                                             </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    {usuarios.length === 0 && (
-                        <div className="p-8 text-center text-gray-400 italic">Nenhum usuário encontrado.</div>
-                    )}
-                </div>
+                                        </div>
+                                    );
+                                }) : (
+                                    <div className="md:col-span-2 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-slate-500">
+                                        Nenhuma campanha cadastrada ainda.
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </section>
+                )}
+
+                {activeTab === 'comunicados' && (
+                    <section role="tabpanel" aria-labelledby="tab-comunicados" className="space-y-6">
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <h2 className="text-xl font-black text-slate-900">Comunicado geral</h2>
+                                <span className="text-sm text-slate-500">{totalDestinoComunicado} destino(s)</span>
+                            </div>
+
+                            <form onSubmit={enviarComunicadoGeral} className="mt-4">
+                                <fieldset disabled={adminActionsDisabled || enviandoComunicado} className={`space-y-5 ${adminActionsDisabled ? 'opacity-60' : ''}`}>
+                                    <div>
+                                        <label className="mb-2 block text-xs font-bold uppercase text-slate-500">Destino</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {[
+                                                { value: 'todos', label: `Todos os aprovados (${totalAprovados})` },
+                                                { value: 'admins', label: `Somente admins (${totalAdmins})` }
+                                            ].map((option) => {
+                                                const ativa = destinoComunicado === option.value;
+
+                                                return (
+                                                    <button
+                                                        key={option.value}
+                                                        type="button"
+                                                        onClick={() => setDestinoComunicado(option.value)}
+                                                        className={`rounded-full border px-3 py-1.5 text-xs font-bold transition-all ${ativa ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+                                                    >
+                                                        {option.label}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="mb-1 block text-xs font-bold uppercase text-slate-500">Mensagem</label>
+                                        <textarea
+                                            rows={5}
+                                            placeholder="Ex: O app foi atualizado. Fechem e abram novamente para carregar a nova versão."
+                                            className="w-full resize-y rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                                            value={comunicadoGeral}
+                                            onChange={(e) => setComunicadoGeral(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                        <p className="text-sm text-slate-500">
+                                            {relayDisponivel()
+                                                ? 'Push e aviso interno para quem estiver habilitado.'
+                                                : 'Aviso interno disponível dentro do app.'}
+                                        </p>
+                                        <button
+                                            type="submit"
+                                            disabled={enviandoComunicado || totalDestinoComunicado === 0 || adminActionsDisabled}
+                                            className={`rounded-xl bg-amber-500 px-6 py-3 text-sm font-bold text-white transition-all hover:bg-amber-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                        >
+                                            {enviandoComunicado ? 'Enviando...' : 'Enviar comunicado'}
+                                        </button>
+                                    </div>
+                                </fieldset>
+                            </form>
+                        </div>
+                    </section>
+                )}
             </div>
 
             {campanhaParaExcluir && (
