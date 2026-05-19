@@ -29,6 +29,29 @@ let oneSignalWebSdkPromise = null;
 let emailUsuarioAtual = null;
 let ultimoTokenRegistrado = null;
 
+const isLikelyContentBlockerError = (error) => {
+    const message = String(error?.message || error || '').toLowerCase();
+    return [
+        'err_blocked_by_client',
+        'blocked by client',
+        'adblock',
+        'ublock',
+        'brave',
+        'privacy',
+        'networkerror',
+        'failed to fetch',
+        'onesignal'
+    ].some((snippet) => message.includes(snippet));
+};
+
+export const describePushActivationError = (error) => {
+    if (isLikelyContentBlockerError(error)) {
+        return 'Um bloqueador de anuncios/privacidade pode ter impedido o carregamento do push. Libere este site e tente novamente.';
+    }
+
+    return String(error?.message || 'Não foi possível ativar notificações neste navegador.');
+};
+
 const ehAndroidNativo = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
 const ehWebComPush = () =>
     !Capacitor.isNativePlatform()
@@ -226,7 +249,7 @@ const carregarOneSignalWebSdk = () => {
         script.id = 'onesignal-web-sdk';
         script.src = ONESIGNAL_WEB_SDK_URL;
         script.defer = true;
-        script.onerror = () => reject(new Error('Não foi possível carregar o SDK Web da OneSignal.'));
+        script.onerror = () => reject(new Error('Não foi possível carregar o SDK Web da OneSignal. O navegador ou alguma extensão pode ter bloqueado esse arquivo.'));
         document.head.appendChild(script);
     });
 

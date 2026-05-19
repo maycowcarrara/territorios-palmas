@@ -517,24 +517,38 @@ const Relatorios = () => {
                         </div>
                     </div>
                     
-                    <div className="flex items-center gap-3">
-                        <button 
-                            onClick={exportarPDF} 
-                            disabled={exportandoPdf}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-all active:scale-95"
-                            title={exportandoPdf ? "Gerando PDF..." : "Baixar Relatório em PDF"}
-                        >
-                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                        </button>
-                        
+                    <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center">
                         <Link 
                             to="/app" 
-                            className="px-5 py-2.5 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 shadow-sm hover:bg-gray-50 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
+                            className="order-1 flex min-h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:text-blue-600 sm:order-2"
                         >
                             ← Voltar ao Mapa
                         </Link>
+                        <button 
+                            onClick={exportarPDF} 
+                            disabled={exportandoPdf}
+                            className="group order-2 flex min-h-12 items-center justify-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-left text-red-700 shadow-sm transition-all hover:border-red-300 hover:bg-red-100 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:order-1"
+                            title={exportandoPdf ? "Gerando PDF..." : "Baixar Relatório em PDF"}
+                        >
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-red-200">
+                                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M14.25 3.75H7.5a1.5 1.5 0 0 0-1.5 1.5v13.5a1.5 1.5 0 0 0 1.5 1.5h9a1.5 1.5 0 0 0 1.5-1.5V8.25l-3.75-4.5Z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M14.25 3.75v4.5H18" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.1} d="m12 10.5 2.25 2.25L12 15m2.25-2.25H8.75" />
+                                </svg>
+                            </span>
+                            <span className="min-w-0 flex-1">
+                                <span className="flex items-center gap-2">
+                                    <span className="text-sm font-extrabold tracking-[0.06em] uppercase">Baixar PDF</span>
+                                    <span className="rounded-full border border-red-200 bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-red-600">
+                                        PDF
+                                    </span>
+                                </span>
+                                <span className="mt-0.5 block text-xs font-medium text-red-600/80">
+                                    {exportandoPdf ? 'Gerando arquivo...' : 'Exportar relatório atual'}
+                                </span>
+                            </span>
+                        </button>
                     </div>
                 </header>
 

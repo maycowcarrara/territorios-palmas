@@ -288,11 +288,13 @@ const CacheMapaOffline = ({ geoJsonData, isOnline, tipoMapa }) => {
 
         let timeoutId = null;
         let cancelWarm = null;
+        let cancelSecondaryWarm = null;
         const aquecerViewport = () => {
             window.clearTimeout(timeoutId);
             timeoutId = window.setTimeout(() => {
                 const profile = getMapWarmProfile();
                 const zoomAtual = Math.round(map.getZoom());
+                const bounds = map.getBounds();
                 const zooms = [...new Set([
                     Math.max(12, zoomAtual - profile.viewportZoomOffset),
                     Math.max(12, zoomAtual),
@@ -302,8 +304,12 @@ const CacheMapaOffline = ({ geoJsonData, isOnline, tipoMapa }) => {
                     cancelWarm();
                 }
 
+                if (cancelSecondaryWarm) {
+                    cancelSecondaryWarm();
+                }
+
                 cancelWarm = scheduleTileWarm(() => warmMapTilesForBounds({
-                    bounds: map.getBounds(),
+                    bounds,
                     zooms,
                     layerTypes: [tipoMapa],
                     maxTilesPerZoom: profile.primaryMaxTilesPerZoom
@@ -314,8 +320,8 @@ const CacheMapaOffline = ({ geoJsonData, isOnline, tipoMapa }) => {
 
                 if (profile.allowSecondaryLayers && profile.secondaryMaxTilesPerZoom > 0) {
                     const outrosTipos = ['padrao', 'google', 'satelite'].filter((layerType) => layerType !== tipoMapa);
-                    scheduleTileWarm(() => warmMapTilesForBounds({
-                        bounds: map.getBounds(),
+                    cancelSecondaryWarm = scheduleTileWarm(() => warmMapTilesForBounds({
+                        bounds,
                         zooms: [zoomAtual],
                         layerTypes: outrosTipos,
                         maxTilesPerZoom: profile.secondaryMaxTilesPerZoom
@@ -334,6 +340,9 @@ const CacheMapaOffline = ({ geoJsonData, isOnline, tipoMapa }) => {
             window.clearTimeout(timeoutId);
             if (cancelWarm) {
                 cancelWarm();
+            }
+            if (cancelSecondaryWarm) {
+                cancelSecondaryWarm();
             }
             map.off('moveend zoomend', aquecerViewport);
         };

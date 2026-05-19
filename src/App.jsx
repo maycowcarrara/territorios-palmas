@@ -6,7 +6,7 @@ import { arrayUnion, collection, query, where, getDocs, onSnapshot, doc, setDoc,
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { signInWithGoogleNative, signOutGoogleNative } from './nativeGoogleAuth';
-import { ativarPushNotifications, desativarPushNotifications } from './pushNotifications';
+import { ativarPushNotifications, desativarPushNotifications, describePushActivationError } from './pushNotifications';
 import { useUsuario } from './useUsuario';
 import appInfo from './version.json';
 import AutoUpdate from './AutoUpdate';
@@ -30,7 +30,6 @@ import {
   OFFLINE_MAP_DOWNLOAD_PROFILES,
   OFFLINE_MAP_MAX_AGE_DAYS,
   getOfflineMapCacheSummary,
-  readOfflineMapViewportBounds,
   readOfflineMapDownloadState,
   writeOfflineMapDownloadState
 } from './mapOfflineCache';
@@ -807,10 +806,8 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(null);
   const [downloadState, setDownloadState] = useState(() => readOfflineMapDownloadState());
-  const [areaMode, setAreaMode] = useState('territorios');
   const [profileId, setProfileId] = useState('medio');
   const [includeSatellite, setIncludeSatellite] = useState(true);
-  const [viewportBounds, setViewportBounds] = useState(() => readOfflineMapViewportBounds());
   const downloadingRef = useRef(false);
   const mountedRef = useRef(false);
   const { notify, confirm } = useUiFeedback();
@@ -824,11 +821,9 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
     if (!geoData) return null;
     return buildOfflineAreaDownloadPlan(geoData, {
       zooms: profile.zooms,
-      layerTypes,
-      areaMode,
-      bounds: areaMode === 'viewport' ? viewportBounds : null
+      layerTypes
     });
-  }, [areaMode, geoData, layerTypes, profile.zooms, viewportBounds]);
+  }, [geoData, layerTypes, profile.zooms]);
 
   useEffect(() => {
     downloadingRef.current = downloading;
@@ -852,7 +847,6 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
       if (!mountedRef.current) return;
       setGeoData(geoData);
       setSummary(cacheSummary);
-      setViewportBounds(readOfflineMapViewportBounds());
       const persistedState = readOfflineMapDownloadState();
       if (persistedState.status === 'running' && !downloadingRef.current) {
         writeOfflineMapDownloadState('interrupted');
@@ -903,8 +897,6 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
         geoJsonData: geoData,
         zooms: profile.zooms,
         layerTypes,
-        areaMode,
-        bounds: areaMode === 'viewport' ? viewportBounds : null,
         onProgress: (next) => setProgress(next)
       });
 
@@ -981,7 +973,6 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
   const percent = progress?.total ? Math.min(100, Math.round((progress.completed / progress.total) * 100)) : 0;
   const zoomLabel = `${Math.min(...profile.zooms)} a ${Math.max(...profile.zooms)}`;
   const estimateMb = plan?.estimatedTotalMb ? Math.round(plan.estimatedTotalMb) : 0;
-  const hasViewportArea = Boolean(viewportBounds);
   const canDownload = !loading && !downloading && !!geoData && totalTiles > 0;
   const freshness = getOfflineMapFreshnessInfo();
   const downloadButtonLabel = freshness.isExpired ? 'Atualizar mapas' : 'Baixar área';
@@ -995,14 +986,14 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
               <span>🗺️</span>
               Mapas Offline
             </h3>
-            <p className="text-xs text-blue-100 mt-1">Escolha a área e o nível de detalhe antes de baixar.</p>
+            <p className="text-xs text-blue-100 mt-1">Baixe todos os territórios com o nível de detalhe desejado.</p>
           </div>
           <button onClick={onClose} className="text-white/80 hover:text-white font-bold text-xl px-2">✕</button>
         </div>
 
         <div className="p-4 overflow-y-auto space-y-4">
-          <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-            O download salva a área útil escolhida nos mapas <strong>rua</strong> e <strong>Google</strong>. O satélite pode entrar junto se você quiser.
+          <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs text-blue-900">
+            Salva a área útil de <strong>todos os territórios</strong> nos mapas <strong>rua</strong> e <strong>Google</strong>. O <strong>satélite</strong> é opcional.
           </div>
 
           {loading ? (
@@ -1013,31 +1004,8 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
           ) : (
             <>
               <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
-                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Área</p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setAreaMode('territorios')}
-                    className={`rounded-xl border px-3 py-3 text-left transition-colors ${areaMode === 'territorios' ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
-                  >
-                    <div className="font-bold text-sm">Territórios</div>
-                    <div className="mt-1 text-xs opacity-80">Baixa a área útil de todos os territórios.</div>
-                  </button>
-                  <button
-                    onClick={() => hasViewportArea && setAreaMode('viewport')}
-                    disabled={!hasViewportArea}
-                    className={`rounded-xl border px-3 py-3 text-left transition-colors ${areaMode === 'viewport' ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'} ${!hasViewportArea ? 'cursor-not-allowed opacity-50' : ''}`}
-                  >
-                    <div className="font-bold text-sm">Tela atual</div>
-                    <div className="mt-1 text-xs opacity-80">
-                      {hasViewportArea ? 'Usa a última área que você abriu no mapa.' : 'Abra a área desejada no mapa primeiro.'}
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Modo</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Detalhe</p>
                   <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
                     <input
                       type="checkbox"
@@ -1048,34 +1016,41 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
                     Incluir satélite
                   </label>
                 </div>
-                <div className="mt-3 space-y-2">
+                <div className="mt-3 grid grid-cols-3 gap-2">
                   {Object.values(OFFLINE_MAP_DOWNLOAD_PROFILES).map((preset) => (
                     <button
                       key={preset.id}
                       onClick={() => setProfileId(preset.id)}
-                      className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${profileId === preset.id ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                      className={`rounded-xl border px-3 py-2.5 text-center transition-colors ${profileId === preset.id ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-bold text-sm">{preset.label}</span>
-                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] opacity-70">Zoom {Math.min(...preset.zooms)}-{Math.max(...preset.zooms)}</span>
-                      </div>
-                      <div className="mt-1 text-xs opacity-80">{preset.description}</div>
+                      <span className="font-bold text-sm">{preset.label}</span>
                     </button>
                   ))}
                 </div>
+                <p className="mt-3 text-xs text-gray-500">
+                  <strong className="text-gray-700">{profile.label}:</strong> {profile.description} · Zoom {zoomLabel}
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Itens salvos</p>
-                  <p className="mt-2 text-xl font-extrabold text-gray-800">{totalEntries.toLocaleString('pt-BR')}</p>
-                  <p className="mt-1 text-xs text-gray-500">{tileEntries} tiles + {summary?.mapDataEntries || 0} arquivo do mapa</p>
+              <div className="rounded-xl border border-gray-200 bg-gradient-to-br from-slate-50 to-white px-4 py-3 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Resumo</p>
+                    <p className="mt-2 text-sm font-semibold text-gray-800">
+                      ~{estimateMb} MB para {totalTiles.toLocaleString('pt-BR')} partes do mapa
+                    </p>
+                  </div>
+                  {totalEntries > 0 && (
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                      {totalEntries.toLocaleString('pt-BR')} itens salvos
+                    </span>
+                  )}
                 </div>
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Estimativa</p>
-                  <p className="mt-2 text-xl font-extrabold text-gray-800">{totalTiles.toLocaleString('pt-BR')}</p>
-                  <p className="mt-1 text-xs text-gray-500">~{estimateMb} MB, zoom {zoomLabel}{includeSatellite ? ', com satélite' : ''}</p>
-                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  Todos os territórios · Zoom {zoomLabel}
+                  {includeSatellite ? ' · Com satélite' : ''}
+                  {tileEntries > 0 ? ` · ${tileEntries} partes do mapa já salvas` : ''}
+                </p>
               </div>
 
               {downloadState.status === 'interrupted' && (
@@ -1112,29 +1087,20 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
                   </p>
                 </div>
               )}
-
-              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
-                Se quiser deixar o aparelho ainda mais pronto para o campo, abra a região desejada no mapa e navegue um pouco por ela com internet. O app vai reforçando o cache das áreas visitadas em segundo plano.
-              </div>
             </>
           )}
         </div>
 
         <div className="p-4 bg-gray-50 border-t border-gray-100 flex gap-2">
-          <button
-            onClick={handleClear}
-            disabled={loading || downloading || totalEntries <= 0}
-            className="flex-1 border border-red-200 text-red-600 font-bold py-2.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-50 transition-colors"
-          >
-            Excluir
-          </button>
-          <button
-            onClick={refreshData}
-            disabled={loading || downloading}
-            className="flex-1 border border-slate-200 text-slate-700 font-bold py-2.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors"
-          >
-            Atualizar
-          </button>
+          {totalEntries > 0 && (
+            <button
+              onClick={handleClear}
+              disabled={loading || downloading}
+              className="border border-red-200 px-4 text-red-600 font-bold py-2.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-50 transition-colors"
+            >
+              Excluir
+            </button>
+          )}
           <button
             onClick={handleDownload}
             disabled={!canDownload}
@@ -1315,8 +1281,13 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
 const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda, abrirSobre, abrirMapaOffline, mapaOfflineNeedsRefresh, contextoSistema, coberturaCampanha, carregandoCobertura }) => {
   const isNativePlatform = Capacitor.isNativePlatform();
   const [deferredPrompt, setDeferredPrompt] = useState(() => (isNativePlatform ? null : deferredPromptGlobal));
+  const [photoUrlComErro, setPhotoUrlComErro] = useState(null);
   const temaSistema = getSistemaTheme(contextoSistema);
   const { notify } = useUiFeedback();
+  const mostrarFotoPerfil = Boolean(user?.photoURL) && photoUrlComErro !== user?.photoURL;
+  const exibirSistemaChip = Boolean(contextoSistema?.campanhaAtiva);
+  const menuActionClass = 'flex min-h-12 items-center gap-3.5 rounded-xl px-3.5 py-3 text-base font-medium transition-colors md:text-[15px]';
+  const menuActionIconClass = 'h-[22px] w-[22px] shrink-0';
 
   useEffect(() => {
     if (isNativePlatform || typeof window === 'undefined') {
@@ -1363,119 +1334,156 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
       <div className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[2001] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
 
         {/* CABEÇALHO DO MENU */}
-        <div className={`${temaSistema.headerBg} app-safe-panel-header p-6 text-white flex-shrink-0`}>
-          <button onClick={onClose} className="absolute top-4 right-4 text-white/80 hover:text-white">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <div className="flex items-center gap-3 mb-3 mt-4">
-            <div className="w-12 h-12 rounded-full bg-white text-blue-600 flex items-center justify-center font-bold text-xl shadow ring-2 ring-blue-400">
-              {(user?.displayName || user?.email || '?')[0].toUpperCase()}
-            </div>
-            <div className="overflow-hidden">
-              <p className="font-bold text-sm truncate">{user?.displayName || 'Usuário'}</p>
-              <p className="text-xs text-blue-200 truncate">{user?.email}</p>
+        <div className={`${temaSistema.headerBg} app-safe-panel-header px-5 pt-5 pb-4 text-white flex-shrink-0`}>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <span
+              className={`inline-flex h-9 items-center rounded-full px-3 text-[10px] font-bold uppercase tracking-[0.14em] shadow-sm ${
+                isAdmin
+                  ? 'border border-violet-200/80 bg-violet-500 text-white'
+                  : 'border border-sky-200/90 bg-sky-100 text-sky-900'
+              }`}
+            >
+              {isAdmin ? 'Administrador' : 'Dirigente'}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleLogout}
+                title="Sair do sistema"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-red-200/80 bg-red-500 px-3 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-400"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd" />
+                </svg>
+                <span>Sair</span>
+              </button>
+              <button
+                onClick={onClose}
+                title="Fechar menu"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white/80 transition-colors hover:bg-white/20 hover:text-white"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
           </div>
-          <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-800/50 border border-blue-400/30 text-blue-100">
-            {isAdmin ? 'Administrador' : 'Dirigente'}
-          </span>
-          <div className="mt-3">
-            <SistemaChip
-              contextoSistema={contextoSistema}
-              coberturaCampanha={coberturaCampanha}
-              carregandoCobertura={carregandoCobertura}
-            />
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-white text-blue-600 shadow-lg ring-2 ring-white/35">
+              {mostrarFotoPerfil ? (
+                <img
+                  src={user.photoURL}
+                  alt={`Foto de perfil de ${user?.displayName || 'Usuário'}`}
+                  className="h-full w-full object-cover"
+                  referrerPolicy="no-referrer"
+                  onError={() => setPhotoUrlComErro(user?.photoURL || null)}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center font-bold text-lg">
+                  {(user?.displayName || user?.email || '?')[0].toUpperCase()}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="pt-0.5 text-base font-bold leading-tight whitespace-normal break-words">
+                {user?.displayName || 'Usuário'}
+              </p>
+              <p className="mt-1 text-xs leading-snug text-blue-100/90 whitespace-normal break-all">
+                {user?.email}
+              </p>
+            </div>
           </div>
+          {exibirSistemaChip ? (
+            <div className="mt-2.5">
+              <SistemaChip
+                contextoSistema={contextoSistema}
+                coberturaCampanha={coberturaCampanha}
+                carregandoCobertura={carregandoCobertura}
+              />
+            </div>
+          ) : null}
         </div>
 
         {/* CORPO DO MENU */}
-        <div className="p-4 flex flex-col gap-2 flex-1 overflow-y-auto">
-
-          {/* 1. MAPA */}
-          <button onClick={() => { navigate('/app'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg bg-blue-50 text-blue-700 font-medium border border-blue-100">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
-            </svg>
-            Mapa
-          </button>
-
-          {/* 2 & 3. ITENS DE ADMIN */}
+        <div className="p-4 flex flex-col gap-2.5 flex-1 overflow-y-auto">
+          {/* 1 & 2. ITENS DE ADMIN */}
           {isAdmin && (
             <>
-              <button onClick={() => { navigate('/relatorios'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
-                  <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+              <button onClick={() => { navigate('/admin'); onClose(); }} className={`${menuActionClass} text-gray-700 hover:bg-gray-50`}>
+                <svg xmlns="http://www.w3.org/2000/svg" className={`${menuActionIconClass} text-gray-500`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h3l.56 2.02a5.98 5.98 0 0 1 1.5.87l1.93-.56 1.5 2.6-1.37 1.46c.06.4.08.79.08 1.11s-.02.71-.08 1.11l1.37 1.46-1.5 2.6-1.93-.56a5.98 5.98 0 0 1-1.5.87L13.5 21h-3l-.56-2.02a5.98 5.98 0 0 1-1.5-.87l-1.93.56-1.5-2.6 1.37-1.46A7.62 7.62 0 0 1 6.3 13.5c0-.32.02-.71.08-1.11L5 10.93l1.5-2.6 1.93.56c.46-.36.97-.65 1.5-.87L10.5 6Z" />
+                  <circle cx="12" cy="13.5" r="2.25" />
                 </svg>
-                Relatórios
+                Painel de Controle
               </button>
 
-              <button onClick={() => { navigate('/admin'); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+              <button onClick={() => { navigate('/relatorios'); onClose(); }} className={`${menuActionClass} text-gray-700 hover:bg-gray-50`}>
+                <svg xmlns="http://www.w3.org/2000/svg" className={`${menuActionIconClass} text-gray-500`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5h15" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 16.5V12" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V8.5" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 16.5V5.5" />
                 </svg>
-                Painel do Sistema
+                Relatórios
               </button>
             </>
           )}
 
-          {/* 4. LEGENDA */}
-          <button onClick={() => { abrirLegenda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-gray-700 transition-colors font-medium">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-            </svg>
-            Legenda do Mapa
-          </button>
-
-          {/* 5. COMO USAR */}
-          <button onClick={() => { abrirAjuda(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-yellow-50 text-yellow-700 transition-colors font-medium">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-            Como usar (Ajuda)
-          </button>
-
-          <button onClick={() => { abrirMapaOffline(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-cyan-50 text-cyan-700 transition-colors font-medium">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M10 2a1 1 0 01.894.553l2 4A1 1 0 0112 8H8a1 1 0 01-.894-1.447l2-4A1 1 0 0110 2zM3 11a2 2 0 012-2h10a2 2 0 012 2v4a3 3 0 01-3 3H6a3 3 0 01-3-3v-4z" />
+          {/* 3. MAPAS OFFLINE */}
+          <button onClick={() => { abrirMapaOffline(); onClose(); }} className={`${menuActionClass} text-cyan-700 hover:bg-cyan-50`}>
+            <svg xmlns="http://www.w3.org/2000/svg" className={menuActionIconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75 15 4.5l6 2.25v12L15 21l-6-2.25L3 21V8.25L9 6.75Z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75v12M15 4.5v12.75" />
             </svg>
             <span>Mapas Offline</span>
             {mapaOfflineNeedsRefresh && (
-              <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-amber-800">
+              <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-amber-800">
                 Atualizar
               </span>
             )}
           </button>
 
+          {/* 4. COMO USAR */}
+          <button onClick={() => { abrirAjuda(); onClose(); }} className={`${menuActionClass} text-yellow-700 hover:bg-yellow-50`}>
+            <svg xmlns="http://www.w3.org/2000/svg" className={menuActionIconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+              <circle cx="12" cy="12" r="8" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 10.25a2.25 2.25 0 1 1 2.06 3.15c-.9.12-1.56.9-1.56 1.8v.3" />
+              <circle cx="12" cy="17.25" r="1" fill="currentColor" stroke="none" />
+            </svg>
+            Como usar (Ajuda)
+          </button>
+
+          {/* 5. LEGENDA */}
+          <button onClick={() => { abrirLegenda(); onClose(); }} className={`${menuActionClass} text-gray-700 hover:bg-gray-50`}>
+            <svg xmlns="http://www.w3.org/2000/svg" className={`${menuActionIconClass} text-gray-500`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 7.5h10.5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h10.5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 16.5h10.5" />
+              <circle cx="5.25" cy="7.5" r="1.25" fill="currentColor" stroke="none" />
+              <circle cx="5.25" cy="12" r="1.25" fill="currentColor" stroke="none" />
+              <circle cx="5.25" cy="16.5" r="1.25" fill="currentColor" stroke="none" />
+            </svg>
+            Legenda do Mapa
+          </button>
+
           {/* 6. INSTALAR */}
           {podeExibirInstalacao && (
-            <button onClick={instalarApp} className="flex items-center gap-3 p-3 rounded-lg hover:bg-green-50 text-green-700 transition-colors font-medium border border-dashed border-green-200 mt-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+            <button onClick={instalarApp} className={`${menuActionClass} mt-2 border border-dashed border-green-200 text-green-700 hover:bg-green-50`}>
+              <svg xmlns="http://www.w3.org/2000/svg" className={menuActionIconClass} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v10.5" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 11.25 3.75 3.75 3.75-3.75" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5h15" />
               </svg>
               Instalar Aplicativo
             </button>
           )}
-
-          <div className="h-px bg-gray-100 my-2"></div>
-
-          {/* 7. SAIR */}
-          <button onClick={handleLogout} className="flex items-center gap-3 p-3 rounded-lg hover:bg-red-50 text-red-600 transition-colors font-medium">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd" />
-            </svg>
-            Sair do Sistema
-          </button>
         </div>
 
         {/* --- RODAPÉ COM BOTÃO DE UPDATE --- */}
-        <div className="p-4 bg-gray-50 border-t border-gray-100 flex-shrink-0 flex flex-col items-center gap-1">
-          <div className="text-[10px] text-gray-400 text-center mb-2">
-            <p className="font-semibold text-gray-500">Territórios Digitais v{appInfo.version}</p>
-            <p className="opacity-70">{appInfo.buildDate}</p>
-          </div>
+          <div className="p-4 bg-gray-50 border-t border-gray-100 flex-shrink-0 flex flex-col items-center gap-1">
+            <div className="mb-2 text-center text-[11px] text-gray-400 md:text-[10px]">
+              <p className="font-semibold text-gray-500">Territórios Digitais v{appInfo.version}</p>
+              <p className="opacity-75">{appInfo.buildDate}</p>
+            </div>
 
           <button 
             onClick={async () => {
@@ -1488,9 +1496,9 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
                   });
                 }
             }}
-            className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-full shadow-sm text-blue-600 text-xs font-bold hover:bg-blue-50 hover:border-blue-200 transition-all active:scale-95"
+            className="flex items-center gap-2.5 px-4 py-2 bg-white border border-gray-200 rounded-full shadow-sm text-blue-600 text-sm font-bold hover:bg-blue-50 hover:border-blue-200 transition-all active:scale-95"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Verificar Atualização
@@ -1501,9 +1509,9 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
               abrirSobre();
               onClose();
             }}
-            className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-full shadow-sm text-slate-700 text-xs font-bold hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
+            className="mt-3 flex items-center gap-2.5 px-4 py-2 bg-white border border-gray-200 rounded-full shadow-sm text-slate-700 text-sm font-bold hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             Sobre o app
@@ -1630,7 +1638,7 @@ function Dashboard() {
       setPushStatus(typeof Notification !== 'undefined' && Notification.permission === 'denied' ? 'bloqueado' : 'desativado');
       notify({
         title: 'Push indisponível',
-        message: String(error?.message || 'Não foi possível ativar notificações neste navegador.'),
+        message: describePushActivationError(error),
         variant: 'warning'
       });
     } finally {

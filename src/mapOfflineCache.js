@@ -3,6 +3,7 @@ export const MAP_DATA_CACHE_NAME = 'offline-map-data-v1';
 export const MAP_TILE_CACHE_NAME = 'offline-map-tiles-v1';
 const OFFLINE_MAP_DOWNLOAD_STATE_KEY = 'offline-map-download-state-v1';
 const OFFLINE_MAP_VIEWPORT_BOUNDS_KEY = 'offline-map-viewport-bounds-v1';
+const OFFLINE_MAP_ESTIMATE_CALIBRATION_KEY = 'offline-map-estimate-calibration-v1';
 export const OFFLINE_MAP_MAX_AGE_DAYS = 365;
 const TILE_LAYER_TYPES = ['padrao', 'google', 'satelite'];
 export const OFFLINE_MAP_DOWNLOAD_ZOOMS = [12, 13, 14, 15, 16, 17, 18, 19];
@@ -55,6 +56,55 @@ function resolveAbsoluteUrl(url) {
 
 function supportsLocalStorage() {
     return typeof window !== 'undefined' && !!window.localStorage;
+}
+
+function clampNumber(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function readOfflineMapEstimateCalibration() {
+    if (!supportsLocalStorage()) {
+        return { factor: 1, samples: 0 };
+    }
+
+    try {
+        const raw = window.localStorage.getItem(OFFLINE_MAP_ESTIMATE_CALIBRATION_KEY);
+        if (!raw) return { factor: 1, samples: 0 };
+
+        const parsed = JSON.parse(raw);
+        const factor = Number(parsed?.factor);
+        const samples = Number(parsed?.samples);
+
+        return {
+            factor: Number.isFinite(factor) ? clampNumber(factor, 0.25, 3) : 1,
+            samples: Number.isFinite(samples) ? clampNumber(Math.round(samples), 0, 12) : 0
+        };
+    } catch (error) {
+        console.warn('Nao foi possivel ler calibracao de tamanho offline:', error);
+        return { factor: 1, samples: 0 };
+    }
+}
+
+function writeOfflineMapEstimateCalibration(nextFactor) {
+    if (!supportsLocalStorage() || !Number.isFinite(nextFactor) || nextFactor <= 0) return;
+
+    try {
+        const current = readOfflineMapEstimateCalibration();
+        const currentSamples = clampNumber(current.samples || 0, 0, 12);
+        const boundedFactor = clampNumber(nextFactor, 0.25, 3);
+        const samples = Math.min(currentSamples + 1, 12);
+        const factor = currentSamples > 0
+            ? ((current.factor * currentSamples) + boundedFactor) / (currentSamples + 1)
+            : boundedFactor;
+
+        window.localStorage.setItem(OFFLINE_MAP_ESTIMATE_CALIBRATION_KEY, JSON.stringify({
+            factor,
+            samples,
+            updatedAt: new Date().toISOString()
+        }));
+    } catch (error) {
+        console.warn('Nao foi possivel salvar calibracao de tamanho offline:', error);
+    }
 }
 
 function estimateLayerMegabytes(tileCount, layerType) {
@@ -584,6 +634,7 @@ export function buildOfflineAreaDownloadPlan(geoJsonData, {
     areaMode = 'territorios',
     bounds = null
 } = {}) {
+    const calibration = readOfflineMapEstimateCalibration();
     const features = geoJsonData?.features || [];
     const resolvedBounds = normalizeBounds(bounds);
     const hasViewportArea = areaMode === 'viewport' && resolvedBounds;
@@ -596,7 +647,10 @@ export function buildOfflineAreaDownloadPlan(geoJsonData, {
             totalTiles: 0,
             tilesByLayer: {},
             estimatedTotalMb: 0,
-            estimatedByLayerMb: {}
+            estimatedByLayerMb: {},
+            rawEstimatedTotalMb: 0,
+            rawEstimatedByLayerMb: {},
+            estimateCalibrationFactor: calibration.factor
         };
     }
 
@@ -605,6 +659,7 @@ export function buildOfflineAreaDownloadPlan(geoJsonData, {
         : buildTilePlanForFeatures(features, zooms);
     const tilesByLayer = {};
     const estimatedByLayerMb = {};
+    const rawEstimatedByLayerMb = {};
     let totalTiles = 0;
     for (const layerType of layerTypes) {
         tilesByLayer[layerType] = {};
@@ -615,8 +670,11 @@ export function buildOfflineAreaDownloadPlan(geoJsonData, {
             totalTiles += count;
             layerTotal += count;
         }
-        estimatedByLayerMb[layerType] = estimateLayerMegabytes(layerTotal, layerType);
+        rawEstimatedByLayerMb[layerType] = estimateLayerMegabytes(layerTotal, layerType);
+        estimatedByLayerMb[layerType] = rawEstimatedByLayerMb[layerType] * calibration.factor;
     }
+
+    const rawEstimatedTotalMb = Object.values(rawEstimatedByLayerMb).reduce((sum, value) => sum + value, 0);
 
     return {
         bounds: hasViewportArea ? resolvedBounds : getGeoJsonBounds(geoJsonData),
@@ -626,7 +684,10 @@ export function buildOfflineAreaDownloadPlan(geoJsonData, {
         tilesByLayer,
         uniqueTilesByZoom,
         estimatedByLayerMb,
-        estimatedTotalMb: Object.values(estimatedByLayerMb).reduce((sum, value) => sum + value, 0)
+        estimatedTotalMb: Object.values(estimatedByLayerMb).reduce((sum, value) => sum + value, 0),
+        rawEstimatedByLayerMb,
+        rawEstimatedTotalMb,
+        estimateCalibrationFactor: calibration.factor
     };
 }
 
@@ -669,6 +730,15 @@ export async function downloadOfflineMapArea({
         throw new Error('Nao foi possivel calcular a area do mapa para download offline.');
     }
 
+    let storageUsageBefore = null;
+    if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
+        try {
+            storageUsageBefore = (await navigator.storage.estimate())?.usage ?? null;
+        } catch (error) {
+            console.warn('Nao foi possivel ler uso de storage antes do download offline:', error);
+        }
+    }
+
     const tasks = [];
     for (const layerType of layerTypes) {
         for (const zoom of zooms) {
@@ -702,7 +772,7 @@ export async function downloadOfflineMapArea({
     await loadMapDataWithOfflineCache();
     completed += 1;
     downloaded += 1;
-    emitProgress({ phase: 'Baixando tiles...' });
+    emitProgress({ phase: 'Baixando partes do mapa...' });
 
     let cursor = 0;
     const workerCount = Math.max(1, Math.min(concurrency, 6));
@@ -720,12 +790,28 @@ export async function downloadOfflineMapArea({
                 downloaded += 1;
             }
             completed += 1;
-            emitProgress({ phase: 'Baixando tiles...' });
+            emitProgress({ phase: 'Baixando partes do mapa...' });
         }
     };
 
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
     await pruneTileCacheIfNeeded();
+
+    if (storageUsageBefore !== null && typeof navigator !== 'undefined' && navigator.storage?.estimate) {
+        try {
+            const storageUsageAfter = (await navigator.storage.estimate())?.usage ?? null;
+            const observedUsageBytes = storageUsageAfter !== null
+                ? Math.max(0, storageUsageAfter - storageUsageBefore)
+                : null;
+            const rawEstimatedBytes = Math.round((plan.rawEstimatedTotalMb || 0) * 1024 * 1024);
+
+            if (observedUsageBytes && rawEstimatedBytes > 0) {
+                writeOfflineMapEstimateCalibration(observedUsageBytes / rawEstimatedBytes);
+            }
+        } catch (error) {
+            console.warn('Nao foi possivel calibrar tamanho do download offline:', error);
+        }
+    }
 
     emitProgress({ phase: 'Concluido' });
 
