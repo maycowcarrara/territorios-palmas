@@ -22,6 +22,8 @@ import { finalizarTerritorioDesignado } from './territorioActions';
 import { describeOutboxConflict } from './territorioOfflineModel';
 import { useTerritorioOutbox, useTerritorioSync } from './useTerritorioOffline';
 import { UiFeedbackProvider, useUiFeedback } from './uiFeedback';
+import { ModalFrame } from './uiPrimitives';
+import { buttonClass } from './uiClasses';
 import {
   buildOfflineAreaDownloadPlan,
   clearOfflineMapCaches,
@@ -490,21 +492,26 @@ const SobreModal = ({ isOpen, onClose }) => {
   ];
 
   return (
-    <div className="fixed inset-0 z-[4000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="bg-blue-600 px-5 py-4 text-white">
-          <h3 className="text-lg font-bold">Sobre o app</h3>
-          <p className="mt-1 text-sm text-blue-100">Informações, versão atual e documentos importantes.</p>
-        </div>
-
-        <div className="space-y-5 p-5">
+    <ModalFrame
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Sobre o app"
+      subtitle="Informações, versão atual e documentos importantes."
+      size="md"
+      accentClass="bg-blue-600"
+      footer={(
+        <button onClick={onClose} className={buttonClass('primary', 'w-full')}>
+          Fechar
+        </button>
+      )}
+    >
           <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-center">
             <p className="text-sm font-bold text-blue-900">Territórios Digitais</p>
             <p className="mt-1 text-xs font-semibold text-blue-700">Versão {appInfo.version}</p>
             <p className="mt-1 text-[11px] text-blue-600/80">{appInfo.buildDate}</p>
           </div>
 
-          <div>
+          <div className="mt-5">
             <h4 className="mb-2 text-sm font-bold text-gray-800">Documentos e privacidade</h4>
             <div className="space-y-2">
               {links.map((link) => (
@@ -523,14 +530,8 @@ const SobreModal = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          <p className="text-center text-xs text-gray-400">Desenvolvido com carinho ❤️</p>
-
-          <button onClick={onClose} className="w-full rounded-xl bg-blue-600 py-3 font-bold text-white hover:bg-blue-700">
-            Fechar
-          </button>
-        </div>
-      </div>
-    </div>
+          <p className="mt-5 text-center text-xs text-gray-400">Desenvolvido com carinho ❤️</p>
+    </ModalFrame>
   );
 };
 
@@ -713,23 +714,19 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl p-0 w-full max-w-sm animate-fade-in overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-        <div className={`p-4 border-b border-gray-100 flex justify-between items-center ${temaSistema.headerBg} text-white`}>
-          <div className="min-w-0">
-            <h3 className="text-lg font-bold flex items-center gap-2">
+    <ModalFrame
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Meus Territórios"
+      size="md"
+      accentClass={temaSistema.headerBg}
+      titleIcon={(
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
               </svg>
-              Meus Territórios
-            </h3>
-            <div className="mt-2">
-              <SistemaChip contextoSistema={contextoSistema} compact />
-            </div>
-          </div>
-          <button onClick={onClose} className="text-white/80 hover:text-white font-bold text-xl px-2">✕</button>
-        </div>
-        <div className="overflow-y-auto p-4 flex-1">
+      )}
+      headerExtra={<SistemaChip contextoSistema={contextoSistema} compact />}
+    >
           {carregando ? (
             <div className="py-10 flex flex-col items-center justify-center text-gray-500">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -793,9 +790,7 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
               ))}
             </div>
           )}
-        </div>
-      </div>
-    </div>
+    </ModalFrame>
   );
 };
 
@@ -978,20 +973,36 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
   const downloadButtonLabel = freshness.isExpired ? 'Atualizar mapas' : 'Baixar área';
 
   return (
-    <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh] animate-fade-in" onClick={(e) => e.stopPropagation()}>
-        <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-blue-600 text-white">
-          <div>
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <span>🗺️</span>
-              Mapas Offline
-            </h3>
-            <p className="text-xs text-blue-100 mt-1">Baixe todos os territórios com o nível de detalhe desejado.</p>
-          </div>
-          <button onClick={onClose} className="text-white/80 hover:text-white font-bold text-xl px-2">✕</button>
+    <ModalFrame
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Mapas Offline"
+      subtitle="Baixe todos os territórios com o nível de detalhe desejado."
+      titleIcon={<span>🗺️</span>}
+      size="md"
+      accentClass="bg-blue-600"
+      bodyClassName="space-y-4 p-4"
+      footer={(
+        <div className="flex gap-2">
+          {totalEntries > 0 && (
+            <button
+              onClick={handleClear}
+              disabled={loading || downloading}
+              className={buttonClass('dangerSoft', 'px-4')}
+            >
+              Excluir
+            </button>
+          )}
+          <button
+            onClick={handleDownload}
+            disabled={!canDownload}
+            className={buttonClass('primary', 'flex-[1.2] disabled:cursor-wait')}
+          >
+            {downloading ? 'Baixando...' : downloadButtonLabel}
+          </button>
         </div>
-
-        <div className="p-4 overflow-y-auto space-y-4">
+      )}
+    >
           <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs text-blue-900">
             Salva a área útil de <strong>todos os territórios</strong> nos mapas <strong>rua</strong> e <strong>Google</strong>. O <strong>satélite</strong> é opcional.
           </div>
@@ -1089,28 +1100,7 @@ const MapaOfflineModal = ({ isOpen, onClose }) => {
               )}
             </>
           )}
-        </div>
-
-        <div className="p-4 bg-gray-50 border-t border-gray-100 flex gap-2">
-          {totalEntries > 0 && (
-            <button
-              onClick={handleClear}
-              disabled={loading || downloading}
-              className="border border-red-200 px-4 text-red-600 font-bold py-2.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-50 transition-colors"
-            >
-              Excluir
-            </button>
-          )}
-          <button
-            onClick={handleDownload}
-            disabled={!canDownload}
-            className="flex-[1.2] bg-blue-600 text-white font-bold py-2.5 rounded-xl disabled:opacity-60 disabled:cursor-wait hover:bg-blue-700 transition-colors"
-          >
-            {downloading ? 'Baixando...' : downloadButtonLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+    </ModalFrame>
   );
 };
 
@@ -1253,12 +1243,19 @@ const BarraSalvandoHeader = ({ visible, count }) => (
 const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm animate-fade-in" onClick={e => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-2">
-          <h3 className="text-lg font-bold text-gray-800">Legenda do Mapa</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 font-bold text-xl px-2">✕</button>
-        </div>
+    <ModalFrame
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Legenda do Mapa"
+      subtitle="Cores e estados usados nos territórios."
+      size="sm"
+      accentClass="bg-blue-600"
+      footer={(
+        <button onClick={onClose} className={buttonClass('primary', 'w-full')}>
+          Entendi
+        </button>
+      )}
+    >
         <div className="space-y-4">
           <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-orange-100 border border-orange-300 opacity-90 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Disponível Recente</p><p className="text-gray-500 text-xs">Trabalhado há menos tempo</p></div></div>
           <div className="flex items-center gap-3"><span className="w-8 h-8 rounded bg-orange-500 border border-orange-700 opacity-70 flex-shrink-0"></span><div><p className="text-gray-800 font-bold text-sm">Disponível Antigo</p><p className="text-gray-500 text-xs">Quanto mais escuro, mais tempo parado</p></div></div>
@@ -1271,9 +1268,7 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
             No zoom mais longe, abaixo do código do território aparece há quanto tempo ele foi trabalhado pela última vez.
           </div>
         </div>
-        <button onClick={onClose} className="w-full mt-6 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700 shadow-sm">Entendi</button>
-      </div>
-    </div>
+    </ModalFrame>
   );
 };
 

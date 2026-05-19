@@ -9,6 +9,8 @@ import { buildPublicAppRouteUrl } from './publicAppUrl';
 import { useSistema } from './useSistema';
 import { getSistemaTheme, isNormalContext, NORMAL_CONTEXT_ID } from './sistema';
 import { useUiFeedback } from './uiFeedback';
+import { AppPage, PageHeader } from './uiPrimitives';
+import { buttonClass, cardBaseClass, cn } from './uiClasses';
 import {
     getTerritorioContextCollectionRef,
     getTerritorioNumeroFromDocId,
@@ -495,17 +497,16 @@ const Relatorios = () => {
         }
     };
 
-    if (loading || carregandoSistema) return <div className="flex h-screen items-center justify-center text-blue-600 font-bold">Carregando dados...</div>;
+    if (loading || carregandoSistema) return <div className="flex h-screen items-center justify-center bg-slate-50 text-blue-600 font-bold">Carregando dados...</div>;
 
     return (
-        <div className="min-h-screen bg-slate-50 p-4 font-sans">
-            <div className="max-w-7xl mx-auto">
-
-                <header className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
-                    <div className="text-center md:text-left">
-                        <h1 className="text-2xl font-extrabold text-slate-800">Relatório de Territórios</h1>
-                        <p className="text-slate-500 text-sm">Gerencie, filtre e veja o histórico.</p>
-                        <div className="mt-2 flex flex-wrap items-center justify-center gap-2 md:justify-start">
+        <AppPage>
+                <PageHeader
+                    eyebrow="Relatórios"
+                    title="Relatório de Territórios"
+                    subtitle="Gerencie, filtre e veja o histórico com a mesma leitura visual do restante do app."
+                    chips={(
+                        <>
                             <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-bold text-slate-700">
                                 <span>Relatório:</span>
                                 <span>{contextoRelatorio.titulo}</span>
@@ -514,20 +515,20 @@ const Relatorios = () => {
                                 <span>{contextoSistema.campanhaAtiva ? '📢' : '🗺️'}</span>
                                 <span>Modo atual: {contextoSistema.contextoAtivoTitulo}</span>
                             </span>
-                        </div>
-                    </div>
-                    
-                    <div className="flex w-full flex-col items-stretch gap-3 sm:w-auto sm:flex-row sm:items-center">
+                        </>
+                    )}
+                    actions={(
+                        <>
                         <Link 
                             to="/app" 
-                            className="order-1 flex min-h-12 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-5 py-3 font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:text-blue-600 sm:order-2"
+                            className={buttonClass('secondary', 'order-1 sm:order-2')}
                         >
                             ← Voltar ao Mapa
                         </Link>
                         <button 
                             onClick={exportarPDF} 
                             disabled={exportandoPdf}
-                            className="group order-2 flex min-h-12 items-center justify-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-left text-red-700 shadow-sm transition-all hover:border-red-300 hover:bg-red-100 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:order-1"
+                            className={buttonClass('dangerSoft', 'group order-2 justify-start text-left disabled:cursor-wait sm:order-1')}
                             title={exportandoPdf ? "Gerando PDF..." : "Baixar Relatório em PDF"}
                         >
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-red-200">
@@ -549,27 +550,28 @@ const Relatorios = () => {
                                 </span>
                             </span>
                         </button>
-                    </div>
-                </header>
+                        </>
+                    )}
+                />
 
                 {/* CARDS DE RESUMO */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                    <div onClick={() => aplicarFiltroRapido('total')} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer transition-all hover:border-slate-300">
+                    <div onClick={() => aplicarFiltroRapido('total')} className={`${cardBaseClass} cursor-pointer p-4 transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md`}>
                         <p className="text-xs font-bold text-slate-400 uppercase">Total</p>
                         <p className="text-3xl font-black text-slate-700">{total}</p>
                         <p className="text-[10px] text-slate-400 mt-1">Clique para ver todos</p>
                     </div>
-                    <div onClick={() => aplicarFiltroRapido('ocupado')} className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-blue-100">
+                    <div onClick={() => aplicarFiltroRapido('ocupado')} className="cursor-pointer rounded-2xl border border-blue-100 bg-blue-50 p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-blue-100 hover:shadow-md">
                         <p className="text-xs font-bold text-blue-400 uppercase">Em trabalho</p>
                         <p className="text-3xl font-black text-blue-700">{ocupados}</p>
                         <p className="text-[10px] text-blue-400 mt-1">Clique para filtrar</p>
                     </div>
-                    <div onClick={() => aplicarFiltroRapido('livre')} className="bg-green-50 p-4 rounded-xl border border-green-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-green-100">
+                    <div onClick={() => aplicarFiltroRapido('livre')} className="cursor-pointer rounded-2xl border border-green-100 bg-green-50 p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-green-100 hover:shadow-md">
                         <p className="text-xs font-bold text-green-500 uppercase">Disponíveis</p>
                         <p className="text-3xl font-black text-green-700">{livres}</p>
                         <p className="text-[10px] text-green-500 mt-1">Clique para filtrar</p>
                     </div>
-                    <div onClick={() => aplicarFiltroRapido('finalizado')} className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 shadow-sm hover:shadow-md cursor-pointer transition-all hover:bg-emerald-100">
+                    <div onClick={() => aplicarFiltroRapido('finalizado')} className="cursor-pointer rounded-2xl border border-emerald-100 bg-emerald-50 p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-100 hover:shadow-md">
                         <p className="text-xs font-bold text-emerald-500 uppercase">Finalizados</p>
                         <p className="text-3xl font-black text-emerald-700">{finalizados}</p>
                         <p className="text-[10px] text-emerald-500 mt-1">Clique para filtrar</p>
@@ -577,7 +579,7 @@ const Relatorios = () => {
                 </div>
 
                 {/* BARRA DE FILTROS */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6">
+                <div className={`${cardBaseClass} mb-6 p-4`}>
                     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px,minmax(0,1fr),210px,150px,auto] lg:items-end">
                         <div className="w-full">
                             <label className="block text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">
@@ -758,7 +760,7 @@ const Relatorios = () => {
                 </div>
 
                 {/* --- MODO DESKTOP: TABELA (VISÍVEL APENAS EM TELAS GRANDES) --- */}
-                <div className="hidden md:block bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                <div className={cn(cardBaseClass, 'hidden overflow-hidden md:block')}>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm whitespace-nowrap">
                             <thead className="bg-slate-50 text-slate-500 font-semibold uppercase text-xs">
@@ -881,8 +883,7 @@ const Relatorios = () => {
                         </table>
                     </div>
                 </div>
-            </div>
-        </div>
+        </AppPage>
     );
 };
 

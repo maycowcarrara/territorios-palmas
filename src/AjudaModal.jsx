@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { ModalFrame } from './uiPrimitives';
+import { buttonClass } from './uiClasses';
 
 const TABS_BASE = [
     { id: 'primeiros-passos', label: 'Primeiros passos' },
@@ -103,42 +105,33 @@ const AjudaModal = ({ isOpen, onClose, isAdmin = false }) => {
     const tabs = useMemo(() => TABS_BASE, []);
     const [activeTab, setActiveTab] = useState(tabs[0].id);
 
-    useEffect(() => {
-        if (isOpen) {
-            setActiveTab(tabs[0].id);
-        }
-    }, [isOpen, tabs]);
-
     if (!isOpen) return null;
 
     return (
-        <div
-            className="fixed inset-0 z-[3000] flex items-stretch sm:items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
-            onClick={onClose}
-        >
-            <div
-                className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[88vh]"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <div className="p-4 border-b border-gray-100 bg-blue-600 text-white shrink-0">
-                    <div className="flex justify-between items-start gap-4">
-                        <div>
-                            <h3 className="text-xl font-bold flex items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                Como usar o mapa
-                            </h3>
-                            <p className="mt-1 text-sm text-blue-100">
-                                Tudo o que você precisa para trabalhar no território sem se perder na tela.
-                            </p>
-                        </div>
-                        <button onClick={onClose} className="text-white/80 hover:text-white font-bold text-2xl leading-none px-2">
-                            &times;
-                        </button>
-                    </div>
+        <ModalFrame
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Como usar o mapa"
+            subtitle="Tudo o que você precisa para trabalhar no território sem se perder na tela."
+            size="lg"
+            accentClass="bg-blue-600"
+            bodyClassName="flex min-h-0 flex-col overflow-hidden p-0"
+            titleIcon={(
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            )}
+            footer={(
+                <div className="flex justify-end">
+                    <button
+                        onClick={onClose}
+                        className={buttonClass('primary', 'px-6')}
+                    >
+                        Entendi, vamos lá!
+                    </button>
                 </div>
-
+            )}
+        >
                 <div className="border-b border-gray-100 bg-gray-50 px-3 py-2.5 shrink-0">
                     <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                         {tabs.map((tab) => (
@@ -335,16 +328,7 @@ const AjudaModal = ({ isOpen, onClose, isAdmin = false }) => {
                     ) : null}
                 </div>
 
-                <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-end shrink-0">
-                    <button
-                        onClick={onClose}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-sm transition-colors"
-                    >
-                        Entendi, vamos lá!
-                    </button>
-                </div>
-            </div>
-        </div>
+        </ModalFrame>
     );
 };
 

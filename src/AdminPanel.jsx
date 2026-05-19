@@ -8,6 +8,8 @@ import { getTerritorioContextCollectionRef } from './territorioContext';
 import { useUiFeedback } from './uiFeedback';
 import { enviarComunicadoPeloRelay, relayDisponivel } from './notificationRelay';
 import { useOnlineStatus } from './useOnlineStatus';
+import { AppPage, PageHeader } from './uiPrimitives';
+import { buttonClass } from './uiClasses';
 
 const ADMIN_OFFLINE_MESSAGE = 'Você está offline. Ações administrativas precisam de conexão para evitar conflito de designações. Conecte-se para continuar.';
 const ADMIN_OFFLINE_ACTION_CLASS = 'disabled:cursor-not-allowed disabled:opacity-50';
@@ -638,24 +640,23 @@ const AdminPanel = () => {
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 p-4 font-sans">
-            <div className="mx-auto max-w-7xl">
-                <header className="mb-4 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-center sm:text-left">
-                            <h1 className="text-xl font-black text-slate-900 sm:text-2xl">Painel de Controle</h1>
-                        </div>
-                        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+        <AppPage>
+                <PageHeader
+                    eyebrow="Administração"
+                    title="Painel de Controle"
+                    subtitle="Usuários, campanhas e comunicados com uma visão limpa para decisões rápidas."
+                    actions={(
+                        <>
                             <div className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${isOnline ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
                                 <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                                 {isOnline ? 'Online' : 'Offline'}
                             </div>
-                            <Link to="/app" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-all hover:border-blue-200 hover:text-blue-600 active:scale-[0.99]">
+                            <Link to="/app" className={buttonClass('secondary')}>
                                 ← Voltar ao Mapa
                             </Link>
-                        </div>
-                    </div>
-                </header>
+                        </>
+                    )}
+                />
 
                 {!isOnline && (
                     <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-900 shadow-sm">
@@ -1355,7 +1356,7 @@ const AdminPanel = () => {
                         </div>
                     </section>
                 )}
-            </div>
+            
 
             {campanhaParaExcluir && (
                 <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={fecharModalExclusaoCampanha}>
@@ -1435,7 +1436,7 @@ const AdminPanel = () => {
                     </div>
                 </div>
             )}
-        </div>
+        </AppPage>
     );
 };
 
