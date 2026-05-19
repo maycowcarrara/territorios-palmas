@@ -22,6 +22,18 @@ import { finalizarTerritorioDesignado } from './territorioActions';
 import { describeOutboxConflict } from './territorioOfflineModel';
 import { useTerritorioOutbox, useTerritorioSync } from './useTerritorioOffline';
 import { UiFeedbackProvider, useUiFeedback } from './uiFeedback';
+import {
+  buildOfflineAreaDownloadPlan,
+  clearOfflineMapCaches,
+  downloadOfflineMapArea,
+  getOfflineMapFreshnessInfo,
+  OFFLINE_MAP_DOWNLOAD_PROFILES,
+  OFFLINE_MAP_MAX_AGE_DAYS,
+  getOfflineMapCacheSummary,
+  readOfflineMapViewportBounds,
+  readOfflineMapDownloadState,
+  writeOfflineMapDownloadState
+} from './mapOfflineCache';
 
 const Mapa = lazy(() => import('./Mapa'));
 const AdminPanel = lazy(() => import('./AdminPanel'));
@@ -34,10 +46,12 @@ const APP_ICON_192 = import.meta.env.VITE_APP_ICON_192 || './icon-192.png';
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 let deferredPromptGlobal = null;
 
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPromptGlobal = e;
-});
+if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPromptGlobal = e;
+  });
+}
 
 // --- TELA DE LOGIN ---
 function Login() {
@@ -786,6 +800,354 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
   );
 };
 
+const MapaOfflineModal = ({ isOpen, onClose }) => {
+  const [loading, setLoading] = useState(false);
+  const [summary, setSummary] = useState(null);
+  const [geoData, setGeoData] = useState(null);
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [downloadState, setDownloadState] = useState(() => readOfflineMapDownloadState());
+  const [areaMode, setAreaMode] = useState('territorios');
+  const [profileId, setProfileId] = useState('medio');
+  const [includeSatellite, setIncludeSatellite] = useState(true);
+  const [viewportBounds, setViewportBounds] = useState(() => readOfflineMapViewportBounds());
+  const downloadingRef = useRef(false);
+  const mountedRef = useRef(false);
+  const { notify, confirm } = useUiFeedback();
+  const profile = OFFLINE_MAP_DOWNLOAD_PROFILES[profileId] || OFFLINE_MAP_DOWNLOAD_PROFILES.medio;
+  const layerTypes = useMemo(
+    () => (includeSatellite ? ['padrao', 'google', 'satelite'] : ['padrao', 'google']),
+    [includeSatellite]
+  );
+
+  const plan = useMemo(() => {
+    if (!geoData) return null;
+    return buildOfflineAreaDownloadPlan(geoData, {
+      zooms: profile.zooms,
+      layerTypes,
+      areaMode,
+      bounds: areaMode === 'viewport' ? viewportBounds : null
+    });
+  }, [areaMode, geoData, layerTypes, profile.zooms, viewportBounds]);
+
+  useEffect(() => {
+    downloadingRef.current = downloading;
+  }, [downloading]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const refreshData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [geoData, cacheSummary] = await Promise.all([
+        loadMapaData(),
+        getOfflineMapCacheSummary()
+      ]);
+
+      if (!mountedRef.current) return;
+      setGeoData(geoData);
+      setSummary(cacheSummary);
+      setViewportBounds(readOfflineMapViewportBounds());
+      const persistedState = readOfflineMapDownloadState();
+      if (persistedState.status === 'running' && !downloadingRef.current) {
+        writeOfflineMapDownloadState('interrupted');
+        if (mountedRef.current) {
+          setDownloadState(readOfflineMapDownloadState());
+        }
+      } else {
+        if (mountedRef.current) {
+          setDownloadState(persistedState);
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      if (!mountedRef.current) return;
+      notify({
+        title: 'Mapa offline indisponível',
+        message: 'Não foi possível carregar os dados para o gerenciamento offline agora.',
+        variant: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [notify]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    refreshData();
+  }, [isOpen, refreshData]);
+
+  const handleDownload = async () => {
+    if (downloading) return;
+
+    writeOfflineMapDownloadState('running');
+    if (mountedRef.current) {
+      setDownloadState(readOfflineMapDownloadState());
+    }
+    setDownloading(true);
+    setProgress({
+      total: plan?.totalTiles ? plan.totalTiles + 1 : 1,
+      completed: 0,
+      downloaded: 0,
+      skipped: 0,
+      phase: 'Preparando download...'
+    });
+
+    try {
+      await downloadOfflineMapArea({
+        geoJsonData: geoData,
+        zooms: profile.zooms,
+        layerTypes,
+        areaMode,
+        bounds: areaMode === 'viewport' ? viewportBounds : null,
+        onProgress: (next) => setProgress(next)
+      });
+
+      writeOfflineMapDownloadState('completed');
+      if (mountedRef.current) {
+        setDownloadState(readOfflineMapDownloadState());
+      }
+      await refreshData();
+      if (!mountedRef.current) return;
+      notify({
+        title: 'Mapas baixados',
+        message: 'A área principal dos territórios ficou salva para uso offline.',
+        variant: 'success'
+      });
+    } catch (error) {
+      console.error(error);
+      writeOfflineMapDownloadState('interrupted');
+      if (mountedRef.current) {
+        setDownloadState(readOfflineMapDownloadState());
+      }
+      if (!mountedRef.current) return;
+      notify({
+        title: 'Download interrompido',
+        message: String(error?.message || 'Não foi possível baixar os mapas offline agora.'),
+        variant: 'error'
+      });
+    } finally {
+      if (mountedRef.current) {
+        setDownloading(false);
+      }
+    }
+  };
+
+  const handleClear = async () => {
+    if (downloading) return;
+
+    const shouldClear = await confirm({
+      title: 'Excluir mapas offline',
+      message: 'Remover os mapas baixados desta área do aparelho?',
+      tone: 'warning',
+      confirmLabel: 'Excluir'
+    });
+
+    if (!shouldClear) return;
+
+    try {
+      await clearOfflineMapCaches();
+      writeOfflineMapDownloadState('idle');
+      if (mountedRef.current) {
+        setDownloadState(readOfflineMapDownloadState());
+      }
+      await refreshData();
+      if (!mountedRef.current) return;
+      notify({
+        title: 'Mapas removidos',
+        message: 'Os arquivos offline desta área foram apagados do aparelho.',
+        variant: 'success'
+      });
+    } catch (error) {
+      console.error(error);
+      notify({
+        title: 'Não foi possível excluir',
+        message: 'Tente novamente em alguns instantes.',
+        variant: 'error'
+      });
+    }
+  };
+
+  if (!isOpen) return null;
+
+  const totalTiles = plan?.totalTiles || 0;
+  const tileEntries = summary?.tileEntries || 0;
+  const totalEntries = summary?.totalEntries || 0;
+  const percent = progress?.total ? Math.min(100, Math.round((progress.completed / progress.total) * 100)) : 0;
+  const zoomLabel = `${Math.min(...profile.zooms)} a ${Math.max(...profile.zooms)}`;
+  const estimateMb = plan?.estimatedTotalMb ? Math.round(plan.estimatedTotalMb) : 0;
+  const hasViewportArea = Boolean(viewportBounds);
+  const canDownload = !loading && !downloading && !!geoData && totalTiles > 0;
+  const freshness = getOfflineMapFreshnessInfo();
+  const downloadButtonLabel = freshness.isExpired ? 'Atualizar mapas' : 'Baixar área';
+
+  return (
+    <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[85vh] animate-fade-in" onClick={(e) => e.stopPropagation()}>
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-blue-600 text-white">
+          <div>
+            <h3 className="text-lg font-bold flex items-center gap-2">
+              <span>🗺️</span>
+              Mapas Offline
+            </h3>
+            <p className="text-xs text-blue-100 mt-1">Escolha a área e o nível de detalhe antes de baixar.</p>
+          </div>
+          <button onClick={onClose} className="text-white/80 hover:text-white font-bold text-xl px-2">✕</button>
+        </div>
+
+        <div className="p-4 overflow-y-auto space-y-4">
+          <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            O download salva a área útil escolhida nos mapas <strong>rua</strong> e <strong>Google</strong>. O satélite pode entrar junto se você quiser.
+          </div>
+
+          {loading ? (
+            <div className="py-8 flex flex-col items-center justify-center text-gray-500">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <p className="mt-3 text-sm font-medium">Lendo dados offline...</p>
+            </div>
+          ) : (
+            <>
+              <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Área</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setAreaMode('territorios')}
+                    className={`rounded-xl border px-3 py-3 text-left transition-colors ${areaMode === 'territorios' ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                  >
+                    <div className="font-bold text-sm">Territórios</div>
+                    <div className="mt-1 text-xs opacity-80">Baixa a área útil de todos os territórios.</div>
+                  </button>
+                  <button
+                    onClick={() => hasViewportArea && setAreaMode('viewport')}
+                    disabled={!hasViewportArea}
+                    className={`rounded-xl border px-3 py-3 text-left transition-colors ${areaMode === 'viewport' ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'} ${!hasViewportArea ? 'cursor-not-allowed opacity-50' : ''}`}
+                  >
+                    <div className="font-bold text-sm">Tela atual</div>
+                    <div className="mt-1 text-xs opacity-80">
+                      {hasViewportArea ? 'Usa a última área que você abriu no mapa.' : 'Abra a área desejada no mapa primeiro.'}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Modo</p>
+                  <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={includeSatellite}
+                      onChange={(e) => setIncludeSatellite(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    Incluir satélite
+                  </label>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {Object.values(OFFLINE_MAP_DOWNLOAD_PROFILES).map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={() => setProfileId(preset.id)}
+                      className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${profileId === preset.id ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-bold text-sm">{preset.label}</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] opacity-70">Zoom {Math.min(...preset.zooms)}-{Math.max(...preset.zooms)}</span>
+                      </div>
+                      <div className="mt-1 text-xs opacity-80">{preset.description}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Itens salvos</p>
+                  <p className="mt-2 text-xl font-extrabold text-gray-800">{totalEntries.toLocaleString('pt-BR')}</p>
+                  <p className="mt-1 text-xs text-gray-500">{tileEntries} tiles + {summary?.mapDataEntries || 0} arquivo do mapa</p>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-gray-400">Estimativa</p>
+                  <p className="mt-2 text-xl font-extrabold text-gray-800">{totalTiles.toLocaleString('pt-BR')}</p>
+                  <p className="mt-1 text-xs text-gray-500">~{estimateMb} MB, zoom {zoomLabel}{includeSatellite ? ', com satélite' : ''}</p>
+                </div>
+              </div>
+
+              {downloadState.status === 'interrupted' && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+                  Um download anterior foi interrompido. Toque em <strong>Baixar área</strong> para retomar aproveitando o que já ficou salvo.
+                </div>
+              )}
+
+              {freshness.isExpired && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-900">
+                  Seus mapas offline passaram de <strong>{OFFLINE_MAP_MAX_AGE_DAYS} dias</strong>. Para continuar confiando no conteúdo salvo, faça um novo download desta área.
+                </div>
+              )}
+
+              {freshness.hasOfflineDownload && !freshness.isExpired && freshness.ageDays !== null && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700">
+                  Último pacote offline baixado há <strong>{freshness.ageDays} dia{freshness.ageDays === 1 ? '' : 's'}</strong>.
+                </div>
+              )}
+
+              {progress && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 text-sm font-semibold text-emerald-800">
+                    <span>{progress.phase}</span>
+                    <span>{percent}%</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-emerald-100">
+                    <div className="h-full rounded-full bg-emerald-500 transition-all duration-300" style={{ width: `${percent}%` }}></div>
+                  </div>
+                  <p className="mt-2 text-xs text-emerald-800">
+                    {progress.completed} de {progress.total} itens processados
+                    {progress.downloaded > 0 ? ` · ${progress.downloaded} baixados` : ''}
+                    {progress.skipped > 0 ? ` · ${progress.skipped} já estavam salvos` : ''}
+                  </p>
+                </div>
+              )}
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+                Se quiser deixar o aparelho ainda mais pronto para o campo, abra a região desejada no mapa e navegue um pouco por ela com internet. O app vai reforçando o cache das áreas visitadas em segundo plano.
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="p-4 bg-gray-50 border-t border-gray-100 flex gap-2">
+          <button
+            onClick={handleClear}
+            disabled={loading || downloading || totalEntries <= 0}
+            className="flex-1 border border-red-200 text-red-600 font-bold py-2.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-50 transition-colors"
+          >
+            Excluir
+          </button>
+          <button
+            onClick={refreshData}
+            disabled={loading || downloading}
+            className="flex-1 border border-slate-200 text-slate-700 font-bold py-2.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 transition-colors"
+          >
+            Atualizar
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={!canDownload}
+            className="flex-[1.2] bg-blue-600 text-white font-bold py-2.5 rounded-xl disabled:opacity-60 disabled:cursor-wait hover:bg-blue-700 transition-colors"
+          >
+            {downloading ? 'Baixando...' : downloadButtonLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const StatusSincronizacaoChip = ({
   isAdmin,
   isOnline,
@@ -950,12 +1312,17 @@ const LegendaModal = ({ isOpen, onClose, isAdmin }) => {
 };
 
 // --- MENU LATERAL (ATUALIZADO - ORDEM REAJUSTADA) ---
-const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda, abrirSobre, contextoSistema, coberturaCampanha, carregandoCobertura }) => {
-  const [deferredPrompt, setDeferredPrompt] = useState(() => deferredPromptGlobal);
+const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, abrirAjuda, abrirLegenda, abrirSobre, abrirMapaOffline, mapaOfflineNeedsRefresh, contextoSistema, coberturaCampanha, carregandoCobertura }) => {
+  const isNativePlatform = Capacitor.isNativePlatform();
+  const [deferredPrompt, setDeferredPrompt] = useState(() => (isNativePlatform ? null : deferredPromptGlobal));
   const temaSistema = getSistemaTheme(contextoSistema);
   const { notify } = useUiFeedback();
 
   useEffect(() => {
+    if (isNativePlatform || typeof window === 'undefined') {
+      return;
+    }
+
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -965,7 +1332,7 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
-  }, []);
+  }, [isNativePlatform]);
 
   const instalarApp = async () => {
     if (deferredPrompt) {
@@ -985,7 +1352,10 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
     }
   };
 
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+  const isStandalone = !isNativePlatform
+    && typeof window !== 'undefined'
+    && window.matchMedia('(display-mode: standalone)').matches;
+  const podeExibirInstalacao = !isNativePlatform && !isStandalone;
 
   return (
     <>
@@ -1067,8 +1437,20 @@ const MenuLateral = ({ isOpen, onClose, user, isAdmin, navigate, handleLogout, a
             Como usar (Ajuda)
           </button>
 
+          <button onClick={() => { abrirMapaOffline(); onClose(); }} className="flex items-center gap-3 p-3 rounded-lg hover:bg-cyan-50 text-cyan-700 transition-colors font-medium">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M10 2a1 1 0 01.894.553l2 4A1 1 0 0112 8H8a1 1 0 01-.894-1.447l2-4A1 1 0 0110 2zM3 11a2 2 0 012-2h10a2 2 0 012 2v4a3 3 0 01-3 3H6a3 3 0 01-3-3v-4z" />
+            </svg>
+            <span>Mapas Offline</span>
+            {mapaOfflineNeedsRefresh && (
+              <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-amber-800">
+                Atualizar
+              </span>
+            )}
+          </button>
+
           {/* 6. INSTALAR */}
-          {!isStandalone && (
+          {podeExibirInstalacao && (
             <button onClick={instalarApp} className="flex items-center gap-3 p-3 rounded-lg hover:bg-green-50 text-green-700 transition-colors font-medium border border-dashed border-green-200 mt-2">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -1148,6 +1530,7 @@ function Dashboard() {
   const [legendaAberta, setLegendaAberta] = useState(false);
   const [ajudaAberta, setAjudaAberta] = useState(false);
   const [sobreAberto, setSobreAberto] = useState(false);
+  const [mapaOfflineAberto, setMapaOfflineAberto] = useState(false);
   const [meusTerritoriosAberto, setMeusTerritoriosAberto] = useState(false);
   const [confirmarLogoutAberto, setConfirmarLogoutAberto] = useState(false);
   const [pushStatus, setPushStatus] = useState('oculto');
@@ -1180,6 +1563,22 @@ function Dashboard() {
   );
   const onlineSyncCount = isOnline ? (outboxSummary.pendingCount + outboxSummary.syncingCount) : 0;
   const offlinePendingCount = !isOnline ? outboxSummary.pendingCount : 0;
+  const mapaOfflineFreshness = getOfflineMapFreshnessInfo();
+
+  useEffect(() => {
+    if (!mapaOfflineFreshness.isExpired || typeof window === 'undefined') return;
+
+    const key = 'offline-map-expired-toast-shown';
+    if (window.sessionStorage.getItem(key)) return;
+
+    window.sessionStorage.setItem(key, '1');
+    notify({
+      title: 'Mapas offline precisam de atualização',
+      message: 'Abra "Mapas Offline" no menu e baixe novamente a área salva.',
+      variant: 'warning',
+      durationMs: 7000
+    });
+  }, [mapaOfflineFreshness.isExpired, notify]);
 
   useEffect(() => {
     if (!user || !autorizado || !Capacitor.isNativePlatform()) return;
@@ -1370,6 +1769,8 @@ function Dashboard() {
         abrirAjuda={() => setAjudaAberta(true)}
         abrirLegenda={() => setLegendaAberta(true)}
         abrirSobre={() => setSobreAberto(true)}
+        abrirMapaOffline={() => setMapaOfflineAberto(true)}
+        mapaOfflineNeedsRefresh={mapaOfflineFreshness.isExpired}
         contextoSistema={contextoSistema}
         coberturaCampanha={coberturaCampanha}
         carregandoCobertura={coberturaCampanha.loading}
@@ -1390,6 +1791,11 @@ function Dashboard() {
       <SobreModal
         isOpen={sobreAberto}
         onClose={() => setSobreAberto(false)}
+      />
+
+      <MapaOfflineModal
+        isOpen={mapaOfflineAberto}
+        onClose={() => setMapaOfflineAberto(false)}
       />
 
       <MeusTerritoriosModal

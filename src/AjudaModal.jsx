@@ -37,6 +37,35 @@ const AjudaModal = ({ isOpen, onClose }) => {
                         </p>
                     </section>
 
+                    <section className="bg-sky-50 border border-sky-200 rounded-xl p-4">
+                        <h4 className="font-bold text-sky-800 mb-2 flex items-center gap-2 text-lg">
+                            <span>📶</span> Offline e Sincronização
+                        </h4>
+                        <div className="space-y-2 text-sm text-gray-700">
+                            <p>
+                                Mesmo sem conexão, você pode continuar trabalhando no território que está com você: marcar quadras, registrar observações e concluir o território.
+                            </p>
+                            <p>
+                                No topo da tela aparece um <strong>chip de status</strong> quando houver offline, pendências, falhas ou conflitos. Toque nele para ver os detalhes.
+                            </p>
+                            <p>
+                                Quando a internet volta, o app sincroniza automaticamente. Se o território tiver mudado de responsável nesse meio tempo, a alteração entra como conflito e não sobrescreve a designação nova.
+                            </p>
+                            <p>
+                                Se você confirmar a finalização enquanto estiver offline, o território será finalizado de vez assim que a conexão voltar, desde que a designação ainda seja a mesma.
+                            </p>
+                        </div>
+                    </section>
+
+                    <section className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                        <h4 className="font-bold text-amber-800 mb-2 flex items-center gap-2 text-lg">
+                            <span>🛡️</span> Admin sem conexão
+                        </h4>
+                        <p className="text-sm text-gray-700">
+                            Ações administrativas ficam bloqueadas offline para evitar conflito de designações. Sem conexão, o admin pode consultar dados cacheados e trabalhar normalmente apenas no território que estiver designado para ele.
+                        </p>
+                    </section>
+
                     <section className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
                         <h4 className="font-bold text-yellow-800 mb-3 flex items-center gap-2 text-lg">
                             <span>💬</span> Observações nas Quadras

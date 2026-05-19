@@ -4,8 +4,11 @@ import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestor
 import { db } from './firebase';
 import { loadMapaData } from './mapData';
 import { buildFeatureIndex, getFeatureBoundsStr, getTerritorioQuadrasCount } from './mapaUtils';
+import { exportarPdfParaDispositivo } from './pdfExport';
+import { buildPublicAppRouteUrl } from './publicAppUrl';
 import { useSistema } from './useSistema';
 import { getSistemaTheme, isNormalContext, NORMAL_CONTEXT_ID } from './sistema';
+import { useUiFeedback } from './uiFeedback';
 import {
     getTerritorioContextCollectionRef,
     getTerritorioNumeroFromDocId,
@@ -22,6 +25,7 @@ const Relatorios = () => {
     const [campanhas, setCampanhas] = useState([]);
     const [contextoSelecionadoId, setContextoSelecionadoId] = useState(null);
     const { config: contextoSistema, loading: carregandoSistema } = useSistema();
+    const { notify } = useUiFeedback();
     const temaSistema = getSistemaTheme(contextoSistema);
 
     // --- ESTADO PARA MULTI-EXPANSÃO ---
@@ -379,7 +383,6 @@ const Relatorios = () => {
             ]);
 
             const doc = new jsPDF();
-            const baseUrl = window.location.href.split('#')[0];
             const tituloRelatorio = contextoRelatorio.tipo === 'campanha'
                 ? `Relatório de Territórios - ${contextoRelatorio.titulo}`
                 : "Relatório de Territórios - Pregação normal";
@@ -460,7 +463,7 @@ const Relatorios = () => {
                     if (data.section === 'body' && data.column.index === 1) {
                         const t = dadosProcessados[data.row.index];
                         if (t && t.boundsStr) {
-                            const deepLink = `${baseUrl}#/app?bounds=${t.boundsStr}`;
+                            const deepLink = buildPublicAppRouteUrl('/app', { bounds: t.boundsStr });
                             doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: deepLink });
                         }
                     }
@@ -470,7 +473,23 @@ const Relatorios = () => {
             const nomeArquivo = isNormalContext(contextoRelatorioId)
                 ? 'Relatorio_Territorios_Normal.pdf'
                 : `Relatorio_${contextoRelatorio.id}.pdf`;
-            doc.save(nomeArquivo);
+            const resultadoExportacao = await exportarPdfParaDispositivo(doc, nomeArquivo);
+
+            if (resultadoExportacao.modo === 'share') {
+                notify({
+                    title: 'PDF pronto',
+                    message: 'O Android abriu as opções para salvar ou compartilhar o relatório.',
+                    variant: 'success'
+                });
+            }
+        } catch (error) {
+            console.error('Erro ao exportar PDF:', error);
+            notify({
+                title: 'Falha ao gerar PDF',
+                message: 'Não foi possível exportar o relatório agora. Tente novamente.',
+                variant: 'error',
+                durationMs: 7000
+            });
         } finally {
             setExportandoPdf(false);
         }

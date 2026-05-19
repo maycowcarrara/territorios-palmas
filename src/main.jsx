@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core'
 import './index.css'
 import App from './App.jsx'
 import 'leaflet/dist/leaflet.css'
+import { MAP_DATA_CACHE_NAME, MAP_TILE_CACHE_NAME } from './mapOfflineCache'
 
 const prepararServiceWorker = async () => {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
@@ -15,7 +16,12 @@ const prepararServiceWorker = async () => {
 
       if ('caches' in window) {
         const cacheNames = await window.caches.keys()
-        await Promise.all(cacheNames.map((cacheName) => window.caches.delete(cacheName)))
+        const preservados = new Set([MAP_DATA_CACHE_NAME, MAP_TILE_CACHE_NAME])
+        await Promise.all(
+          cacheNames
+            .filter((cacheName) => !preservados.has(cacheName))
+            .map((cacheName) => window.caches.delete(cacheName))
+        )
       }
 
       if (registrations.length > 0 && !window.sessionStorage.getItem('native-sw-cleaned')) {

@@ -27,6 +27,9 @@ import {
 } from './territorioActions';
 import { groupNoteDocsByQuadra, getTerritorioNotasCollectionRef, isLegacyNoteId, mergeTerritorioNotas } from './territorioNotes';
 import { reduceNotasComOutbox, reduceTerritorioComOutbox, TERRITORIO_ACTION_TYPE } from './territorioOfflineModel';
+import { getGeoJsonBounds, getMapWarmProfile, scheduleTileWarm, warmMapTilesForBounds, writeOfflineMapViewportBounds } from './mapOfflineCache';
+import { buildPublicAppRouteUrl } from './publicAppUrl';
+import { buildAppLocationUrl, buildGoogleMapsUrl, buildLocationShareText, buildWhatsAppShareUrl } from './shareLinks';
 import L from 'leaflet';
 import { useUiFeedback } from './uiFeedback';
 import { enviarEventoNotificacaoPeloRelay, relayDisponivel } from './notificationRelay';
@@ -257,6 +260,86 @@ const ControleVisibilidade = ({ ocultarCores, setOcultarCores, mostrarDicas }) =
             </div>
         </div>
     );
+};
+
+const CacheMapaOffline = ({ geoJsonData, isOnline, tipoMapa }) => {
+    const map = useMap();
+
+    useEffect(() => {
+        if (!geoJsonData || !isOnline) return;
+
+        const bounds = getGeoJsonBounds(geoJsonData);
+        if (!bounds) return;
+
+        const profile = getMapWarmProfile();
+        return scheduleTileWarm(() => warmMapTilesForBounds({
+            bounds,
+            zooms: profile.overviewZooms,
+            layerTypes: [tipoMapa],
+            maxTilesPerZoom: Math.max(10, profile.primaryMaxTilesPerZoom - 4)
+        }), {
+            delayMs: 6000,
+            timeoutMs: 5000
+        });
+    }, [geoJsonData, isOnline, tipoMapa]);
+
+    useEffect(() => {
+        if (!isOnline) return undefined;
+
+        let timeoutId = null;
+        let cancelWarm = null;
+        const aquecerViewport = () => {
+            window.clearTimeout(timeoutId);
+            timeoutId = window.setTimeout(() => {
+                const profile = getMapWarmProfile();
+                const zoomAtual = Math.round(map.getZoom());
+                const zooms = [...new Set([
+                    Math.max(12, zoomAtual - profile.viewportZoomOffset),
+                    Math.max(12, zoomAtual),
+                ])];
+
+                if (cancelWarm) {
+                    cancelWarm();
+                }
+
+                cancelWarm = scheduleTileWarm(() => warmMapTilesForBounds({
+                    bounds: map.getBounds(),
+                    zooms,
+                    layerTypes: [tipoMapa],
+                    maxTilesPerZoom: profile.primaryMaxTilesPerZoom
+                }), {
+                    delayMs: 1200,
+                    timeoutMs: 3500
+                });
+
+                if (profile.allowSecondaryLayers && profile.secondaryMaxTilesPerZoom > 0) {
+                    const outrosTipos = ['padrao', 'google', 'satelite'].filter((layerType) => layerType !== tipoMapa);
+                    scheduleTileWarm(() => warmMapTilesForBounds({
+                        bounds: map.getBounds(),
+                        zooms: [zoomAtual],
+                        layerTypes: outrosTipos,
+                        maxTilesPerZoom: profile.secondaryMaxTilesPerZoom
+                    }), {
+                        delayMs: 9000,
+                        timeoutMs: 5000
+                    });
+                }
+            }, 500);
+        };
+
+        aquecerViewport();
+        map.on('moveend zoomend', aquecerViewport);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+            if (cancelWarm) {
+                cancelWarm();
+            }
+            map.off('moveend zoomend', aquecerViewport);
+        };
+    }, [isOnline, map, tipoMapa]);
+
+    return null;
 };
 
 const ControlesNavegacao = ({
@@ -610,9 +693,15 @@ const MarcadorUsuario = ({ posicao, direcao }) => {
     if (!posicaoExibida) return null;
 
     const compartilharLocalizacao = () => {
-        const linkGoogle = `https://www.google.com/maps?q=${posicaoExibida.lat},${posicaoExibida.lng}`;
-        const textoEncoded = encodeURIComponent(`*Minha localização no território:*\n\n${linkGoogle}`);
-        window.open(`https://wa.me/?text=${textoEncoded}`, '_blank');
+        const appUrl = buildAppLocationUrl(posicaoExibida.lat, posicaoExibida.lng, 17);
+        const mapsUrl = buildGoogleMapsUrl(posicaoExibida.lat, posicaoExibida.lng);
+        const text = buildLocationShareText({
+            title: 'Minha localização no território',
+            appUrl,
+            mapsUrl
+        });
+
+        window.open(buildWhatsAppShareUrl(text), '_blank');
     };
 
     return (
@@ -1271,8 +1360,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
     );
 
     const gerarLinkMsg = (uNome, uWhats) => {
-        const baseUrl = window.location.href.split('?')[0].split('#')[0] + '#/app';
-        const linkInterno = `${baseUrl}?lat=${centro.lat}&lng=${centro.lng}&z=16`;
+        const linkInterno = buildPublicAppRouteUrl('/app', { lat: centro.lat, lng: centro.lng, z: 16 });
         const tituloContexto = contextoSistema?.campanhaAtiva ? `\n*Modo:* ${contextoSistema.contextoAtivoTitulo}` : '';
         const textoMsg = `Olá *${uNome}*! \nO território *${nome}* foi designado para você.${tituloContexto}\n\n *Acesse pelo App:* ${linkInterno}\n\nBom trabalho!`;
         return { texto: textoMsg, whatsapp: uWhats, nome: uNome };
@@ -1368,7 +1456,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                     ultimaAlteracao: agora
                 });
 
-                const link = `${window.location.href.split('#')[0]}#/app?lat=${centro.lat}&lng=${centro.lng}&z=16`;
+                const link = buildPublicAppRouteUrl('/app', { lat: centro.lat, lng: centro.lng, z: 16 });
                 const contextoLinha = contextoSistema?.campanhaAtiva ? `\n *Modo:* ${contextoSistema.contextoAtivoTitulo}` : '';
                 setMsgPronta({ texto: `Olá *${novoNome}*! \nO território *${nome}* foi designado para você.${contextoLinha}\n\n *Acesse:* ${link}\n\nBom trabalho!`, whatsapp: usuarioObj?.whatsapp, nome: novoNome });
 
@@ -1435,23 +1523,27 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
     const compartilharDiretamente = () => {
         const usuarioObj = listaUsuarios.find(u => u.email === dadosBanco.designadoPara);
         const msg = gerarLinkMsg(dadosBanco.designadoNome, usuarioObj?.whatsapp);
-        const textoEncoded = encodeURIComponent(msg.texto);
-        const url = msg.whatsapp ? `https://wa.me/${msg.whatsapp.replace(/\D/g, '')}?text=${textoEncoded}` : `https://wa.me/?text=${textoEncoded}`;
-        window.open(url, '_blank');
+        window.open(buildWhatsAppShareUrl(msg.texto, msg.whatsapp), '_blank');
     };
 
     const abrirWhatsapp = () => {
         if (!msgPronta) return;
-        const textoEncoded = encodeURIComponent(msgPronta.texto);
-        const url = msgPronta.whatsapp ? `https://wa.me/${msgPronta.whatsapp.replace(/\D/g, '')}?text=${textoEncoded}` : `https://wa.me/?text=${textoEncoded}`;
-        window.open(url, '_blank');
+        window.open(buildWhatsAppShareUrl(msgPronta.texto, msgPronta.whatsapp), '_blank');
         setMsgPronta(null);
     };
 
     const compartilharPontoEncontro = () => {
         const p = posicaoClique || centro;
-        // LINK CORRIGIDO
-        window.open(`https://wa.me/?text=${encodeURIComponent(`*Ponto de Encontro - ${nome}*:\n\nhttps://www.google.com/maps?q=${p.lat},${p.lng}`)}`, '_blank');
+        const appUrl = buildAppLocationUrl(p.lat, p.lng, 17);
+        const mapsUrl = buildGoogleMapsUrl(p.lat, p.lng);
+        const text = buildLocationShareText({
+            title: 'Ponto de Encontro',
+            territoryName: nome,
+            appUrl,
+            mapsUrl
+        });
+
+        window.open(buildWhatsAppShareUrl(text), '_blank');
     };
 
     if (!isAdmin && !isMeu) return null;
@@ -1609,7 +1701,30 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                     <Popup>
                         <div className="flex flex-col items-center gap-2 p-1 min-w-[150px]">
                             <h3 className="font-bold text-gray-800 text-sm">{ref.nome}</h3>
-                            <button onClick={() => window.open(`https://www.google.com/maps?q=${ref.lat},${ref.lng}`, '_blank')} className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-xs font-medium w-full shadow-sm">Compartilhar</button>
+                            <button
+                                onClick={() => {
+                                    const appUrl = buildAppLocationUrl(ref.lat, ref.lng, 18);
+                                    const mapsUrl = buildGoogleMapsUrl(ref.lat, ref.lng);
+                                    const text = buildLocationShareText({
+                                        title: 'Ponto de Referência',
+                                        territoryName: nome,
+                                        appUrl,
+                                        mapsUrl,
+                                        extraLine: `Referência: *${ref.nome}*`
+                                    });
+
+                                    window.open(buildWhatsAppShareUrl(text), '_blank');
+                                }}
+                                className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-xs font-medium w-full shadow-sm"
+                            >
+                                Compartilhar
+                            </button>
+                            <button
+                                onClick={() => window.open(buildGoogleMapsUrl(ref.lat, ref.lng), '_blank')}
+                                className="bg-white border border-blue-200 text-blue-700 px-3 py-1.5 rounded-md text-xs font-medium w-full shadow-sm"
+                            >
+                                Abrir no mapa
+                            </button>
                         </div>
                     </Popup>
                 </Marker>
@@ -1697,7 +1812,20 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
     }, []);
 
     const MapEvents = () => {
-        const map = useMapEvents({ zoomend: () => setZoomLevel(map.getZoom()) });
+        const map = useMapEvents({
+            zoomend: () => {
+                setZoomLevel(map.getZoom());
+                writeOfflineMapViewportBounds(map.getBounds());
+            },
+            moveend: () => {
+                writeOfflineMapViewportBounds(map.getBounds());
+            }
+        });
+
+        useEffect(() => {
+            writeOfflineMapViewportBounds(map.getBounds());
+        }, [map]);
+
         return null;
     };
 
@@ -1710,6 +1838,7 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
                 <MapContainer center={MAP_INITIAL_CENTER} zoom={MAP_INITIAL_ZOOM} maxZoom={22} zoomControl={false} className="h-full w-full z-0">
                     <MapEvents />
                     <DeepLinkHandler />
+                    <CacheMapaOffline geoJsonData={geoJsonData} isOnline={isOnline} tipoMapa={tipoMapa} />
                     {tipoMapa === 'padrao' && <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxNativeZoom={19} maxZoom={22} />}
                     {tipoMapa === 'google' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
                     {tipoMapa === 'satelite' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}

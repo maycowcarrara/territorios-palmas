@@ -8,8 +8,54 @@ O sistema foi pensado para uso real no dia a dia:
 
 - dirigentes visualizam seus territórios e marcam quadras concluídas
 - administradores designam, devolvem, acompanham histórico e geram relatórios
-- observações por quadra ficam salvas como conhecimento permanente do território
-- campanhas podem ser ativadas algumas vezes por ano sem apagar o progresso normal
+- observações por quadra e condomínio ficam salvas como conhecimento permanente do território
+- campanhas podem ser ativadas sem apagar o progresso normal
+- o app continua utilizável sem conexão para execução segura do território
+
+## Modo Offline Seguro
+
+O modo offline foi desenhado para permitir trabalho de campo sem abrir brecha para sobrescrever uma designação nova.
+
+### O que pode offline
+
+- marcar e desmarcar quadras
+- adicionar, editar e excluir observações
+- preparar pedido de finalização
+- confirmar finalização para concluir automaticamente quando a conexão voltar
+- consultar dados já carregados no aparelho
+
+### O que não pode offline
+
+Ações administrativas exigem conexão:
+
+- designar território
+- devolver ou liberar território
+- transferir responsável
+- finalizar ou reabrir como admin
+- criar, ativar ou excluir campanha
+- mudar usuários e permissões
+- enviar comunicados e notificações administrativas
+
+### Como a proteção funciona
+
+- cada ciclo de designação recebe um `designacaoId`
+- toda ação offline guarda `territorioId`, `userEmail`, `designacaoId`, tipo e payload
+- na sincronização, a ação só é aplicada se o servidor ainda tiver:
+  - `designadoPara === userEmail`
+  - `designacaoId === action.designacaoId`
+- se a designação mudou, a ação vira `conflict` e não é aplicada automaticamente
+
+### Fila local
+
+As ações locais ficam em uma outbox no IndexedDB com estes estados:
+
+- `pending`
+- `syncing`
+- `synced`
+- `conflict`
+- `failed`
+
+Quando o usuário está online, o app mostra uma barra discreta de salvamento abaixo do header. Quando há offline, pendências, falhas ou conflitos, o topo mostra um chip de status; ao tocar nele, o usuário vê os detalhes.
 
 ## Funcionalidades
 
@@ -20,12 +66,15 @@ O sistema foi pensado para uso real no dia a dia:
 - controle de zoom, GPS, pontos de referência e condomínios
 - marcação de quadras feitas e pendentes
 - ponto de encontro compartilhável por WhatsApp
+- status de sincronização visível no header
 
 ### Observações
 
 - notas por quadra e condomínio
 - edição e exclusão com controle por autor/admin
 - observações permanentes, compartilhadas entre modo normal e campanhas
+- novas notas salvas como documentos próprios em `territorios/{id}/notas`
+- notas legadas continuam visíveis para compatibilidade
 
 ### Painel do Sistema
 
@@ -34,13 +83,14 @@ O sistema foi pensado para uso real no dia a dia:
 - ativação e desativação de campanhas
 - reativação de campanhas salvas
 - retorno imediato ao modo normal sem perder progresso anterior
+- ações de escrita bloqueadas enquanto o admin estiver offline
 
 ### Campanhas
 
 - o sistema possui um contexto ativo global
 - no modo normal, o andamento usa a coleção `territorios`
 - no modo campanha, o andamento usa a coleção `territorios_contexto`
-- `notas_quadras` permanecem no território base e continuam visíveis em qualquer contexto
+- as notas continuam no território base e aparecem em qualquer contexto
 - o topo do app mostra chip da campanha, variação de cor e percentual de cobertura
 
 ### Relatórios
@@ -71,13 +121,14 @@ O sistema foi pensado para uso real no dia a dia:
 
 - `territorios`
   - documento: `t_{numero}`
-  - dados permanentes e modo normal
-  - campos comuns: `designadoPara`, `designadoNome`, `quadras_feitas`, `historico`, `notas_quadras`
+  - dados permanentes e base de notas
+  - campos comuns: `nome`, `ultimaAlteracao`, `historico`
+  - subcoleção: `notas`
 
 - `territorios_contexto`
   - documento: `{contextoId}__t_{numero}`
-  - progresso específico de campanhas
-  - campos comuns: `contextoId`, `territorioNumero`, `designadoPara`, `quadras_feitas`, `historico`
+  - progresso do território no contexto ativo
+  - campos comuns: `contextoId`, `territorioNumero`, `designadoPara`, `designadoNome`, `designacaoId`, `cicloAtual`, `quadras_feitas`, `status`, `historico`
 
 - `configuracoes`
   - documento: `sistema`
@@ -89,6 +140,20 @@ O sistema foi pensado para uso real no dia a dia:
 - `notificacoes`
   - avisos administrativos e notificações do sistema
 
+### Estrutura das notas
+
+Notas novas ficam na subcoleção `territorios/{id}/notas`, com campos como:
+
+- `quadraId`
+- `texto`
+- `autorEmail`
+- `autorNome`
+- `data`
+- `editadoEm`
+- `designacaoId`
+- `territorioId`
+- `contextoId`
+
 ## Regras do Firestore
 
 As rules do projeto estão versionadas em [firestore.rules](./firestore.rules) e referenciadas em [firebase.json](./firebase.json).
@@ -98,7 +163,10 @@ As regras atuais cobrem:
 - leitura do contexto ativo por usuários aprovados
 - gestão de campanhas apenas por admin
 - progresso de campanha em `territorios_contexto`
-- manutenção das permissões já existentes para `usuarios`, `territorios` e `notificacoes`
+- execução de território permitida ao responsável atual
+- bloqueio de escrita quando `designacaoId` mudou
+- bloqueio de campos administrativos para usuário comum
+- escrita de notas validada por designação e permissões de autor/admin
 
 ## Instalação
 
@@ -197,7 +265,7 @@ npm run build:general
 
 O Firebase Hosting usa o target `app` em [firebase.json](./firebase.json), e o target aponta para um site diferente em cada projeto dentro de [.firebaserc](./.firebaserc).
 
-Cada arquivo de ambiente também deve definir `VITE_LIVE_UPDATE_MANIFEST_URL` apontando para o Hosting da própria congregação. Se essa variável ficar vazia, o live update nativo fica desativado para evitar baixar pacote de outra instância.
+Cada arquivo de ambiente também deve definir `VITE_PUBLIC_APP_URL` e `VITE_LIVE_UPDATE_MANIFEST_URL` apontando para o Hosting da própria congregação. O app usa `VITE_PUBLIC_APP_URL` ao gerar links compartilháveis no WhatsApp e em PDFs; se ela ficar vazia, o fallback tenta inferir a URL a partir de `VITE_LIVE_UPDATE_MANIFEST_URL`.
 
 Cada instância também pode apontar para um mapa próprio com `VITE_MAPA_URL`. Para o General, use `./mapa.general.json`; enquanto o mapa real não estiver pronto, esse arquivo pode ser uma `FeatureCollection` vazia.
 
