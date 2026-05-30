@@ -208,10 +208,19 @@ service cloud.firestore {
              request.resource.data.texto.size() <= 2000;
     }
 
+    function destinatarioAdminValido() {
+      return request.resource.data.para is string &&
+             exists(/databases/$(database)/documents/usuarios/$(request.resource.data.para.lower())) &&
+             get(/databases/$(database)/documents/usuarios/$(request.resource.data.para.lower())).data.role == 'admin';
+    }
+
     function podeCriarNotificacaoAdminSistemaDireta() {
       return estaLogado() &&
              notificacaoValida() &&
-             request.resource.data.para == 'ADMINS' &&
+             (
+               request.resource.data.para == 'ADMINS' ||
+               destinatarioAdminValido()
+             ) &&
              request.resource.data.origem == 'sistema' &&
              request.resource.data.lida == false &&
              !request.resource.data.keys().hasAny(['lidaPor']) &&

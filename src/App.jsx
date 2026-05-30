@@ -55,6 +55,100 @@ const APP_SHORT_NAME = import.meta.env.VITE_APP_SHORT_NAME || 'Territórios';
 const APP_SUBTITLE = import.meta.env.VITE_APP_SUBTITLE || '';
 const APP_ICON_192 = import.meta.env.VITE_APP_ICON_192 || './icon-192.png';
 
+const getMeusTerritoriosQuery = ({ email, contextoId }) => {
+  if (isNormalContext(contextoId)) {
+    return query(collection(db, "territorios"), where("designadoPara", "==", email));
+  }
+
+  return query(
+    getTerritorioContextCollectionRef(db),
+    where("contextoId", "==", contextoId),
+    where("designadoPara", "==", email)
+  );
+};
+
+const carregarMeusTerritoriosDocs = async ({ email, contextoId }) => {
+  const querySnapshot = await getDocs(getMeusTerritoriosQuery({ email, contextoId }));
+  return querySnapshot.docs.map((territorioDoc) => ({
+    id: territorioDoc.id,
+    ...territorioDoc.data()
+  }));
+};
+
+const montarListaMeusTerritorios = async ({ docs }) => {
+  if (!Array.isArray(docs) || docs.length === 0) {
+    return [];
+  }
+
+  const geoData = await loadMapaData();
+  const featureMap = buildFeatureIndex(geoData);
+  const listaCompleta = docs.map((territorioDoc) => {
+    const numeroId = territorioDoc.territorioNumero || parseInt(String(territorioDoc.id).replace(/.*t_/, ''), 10);
+    const feature = featureMap.get(numeroId);
+    const nome = normalizeTerritorioNome(
+      territorioDoc.nome || feature?.properties?.nome,
+      `Território ${numeroId}`
+    );
+    const boundsStr = getFeatureBoundsStr(feature);
+    const totalQuadras = getTerritorioQuadrasCount(feature);
+    const progresso = getTerritorioProgresso(territorioDoc, totalQuadras);
+    const quadrasFeitas = progresso.quadrasFeitasExibicao;
+    const quadrasRestantes = Math.max(totalQuadras - quadrasFeitas, 0);
+    const percentual = progresso.percentualExibicao;
+
+    let statusResumo = 'Em andamento';
+    let descricaoResumo = `${quadrasRestantes} quadra${quadrasRestantes === 1 ? '' : 's'} faltando`;
+    let barraClasse = 'bg-blue-600';
+    let badgeClasse = 'bg-amber-100 text-amber-700';
+
+    if (progresso.isAguardandoFinalizacao) {
+      statusResumo = 'Aguardando finalização';
+      descricaoResumo = 'Todas as quadras marcadas; falta confirmar a finalização';
+      barraClasse = 'bg-yellow-400';
+      badgeClasse = 'bg-yellow-100 text-yellow-700';
+    } else if (progresso.isFinalizado) {
+      statusResumo = 'Finalizado';
+      descricaoResumo = 'Território encerrado e aguardando nova liberação';
+      barraClasse = 'bg-green-500';
+      badgeClasse = 'bg-green-100 text-green-700';
+    }
+
+    let dataFormatada = "Data desc.";
+    let dataDesignacaoOrdenacao = 0;
+    if (territorioDoc.dataDesignacao) {
+      const d = territorioDoc.dataDesignacao.toDate ? territorioDoc.dataDesignacao.toDate() : new Date(territorioDoc.dataDesignacao);
+      dataFormatada = d.toLocaleDateString('pt-BR');
+      dataDesignacaoOrdenacao = d.getTime();
+    }
+
+    return {
+      ...territorioDoc,
+      numeroId,
+      nome,
+      boundsStr,
+      dataFormatada,
+      dataDesignacaoOrdenacao,
+      totalQuadras,
+      quadrasFeitas,
+      quadrasRestantes,
+      percentual,
+      statusResumo,
+      descricaoResumo,
+      barraClasse,
+      badgeClasse,
+      podeFinalizarDireto: progresso.isAguardandoFinalizacao && Boolean(territorioDoc.designadoPara)
+    };
+  });
+
+  listaCompleta.sort((a, b) => {
+    const diffTempo = a.dataDesignacaoOrdenacao - b.dataDesignacaoOrdenacao;
+    if (diffTempo !== 0) return diffTempo;
+    return a.numeroId - b.numeroId;
+  });
+
+  return listaCompleta;
+};
+
 // --- CAPTURA GLOBAL DO EVENTO DE INSTALAÇÃO ---
 let deferredPromptGlobal = null;
 
@@ -424,19 +518,42 @@ const SininhoNotificacoes = ({
   ativandoPush = false,
   onAtivarPush
 }) => {
-  const [notificacoes, setNotificacoes] = useState([]);
+  const [notificacoesPessoais, setNotificacoesPessoais] = useState([]);
+  const [notificacoesAdminLegado, setNotificacoesAdminLegado] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
   const { notify } = useUiFeedback();
   const idsNotificadosRef = useRef(new Set());
-  const snapshotsIniciaisRef = useRef({ pessoais: false, admins: false });
+  const snapshotsIniciaisRef = useRef({ pessoais: false });
+  const carregarNotificacoesAdminLegado = useCallback(async () => {
+    if (!user?.email || !isAdmin) return [];
+
+    const emailNormalizado = user.email.toLowerCase();
+    const q2 = query(collection(db, "notificacoes"), where("para", "==", "ADMINS"));
+    const snap = await getDocs(q2);
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data(), escopoNotificacao: 'admins' }))
+      .filter((notif) => !(Array.isArray(notif.lidaPor) && notif.lidaPor.includes(emailNormalizado)));
+  }, [isAdmin, user]);
+
+  const notificacoes = useMemo(
+    () => {
+      const notificacoesAdminExibidas = isAdmin ? notificacoesAdminLegado : [];
+      return [...notificacoesPessoais, ...notificacoesAdminExibidas]
+        .sort((a, b) => (b.data?.seconds || 0) - (a.data?.seconds || 0));
+    },
+    [isAdmin, notificacoesAdminLegado, notificacoesPessoais]
+  );
 
   useEffect(() => {
     if (!user) return;
     const emailNormalizado = user.email.toLowerCase();
-    const q1 = query(collection(db, "notificacoes"), where("para", "==", user.email));
-    const unsubs = [];
+    const q1 = query(
+      collection(db, "notificacoes"),
+      where("para", "==", user.email),
+      where("lida", "==", false)
+    );
     idsNotificadosRef.current = new Set();
-    snapshotsIniciaisRef.current = { pessoais: false, admins: false };
+    snapshotsIniciaisRef.current = { pessoais: false };
 
     const getTituloNotificacao = (notif) => {
       const titulos = {
@@ -461,8 +578,7 @@ const SininhoNotificacoes = ({
     const filtrarNaoLidas = (lista) => lista.filter((notif) => !notificacaoEstaLida(notif));
 
     const registrarNotificacoesInApp = (lista, escopo) => {
-      const chaveSnapshot = escopo === 'admins' ? 'admins' : 'pessoais';
-      const snapshotInicialConcluido = snapshotsIniciaisRef.current[chaveSnapshot];
+      const snapshotInicialConcluido = snapshotsIniciaisRef.current[escopo];
 
       filtrarNaoLidas(lista).forEach((notif) => {
         if (idsNotificadosRef.current.has(notif.id)) return;
@@ -480,36 +596,73 @@ const SininhoNotificacoes = ({
 
       snapshotsIniciaisRef.current = {
         ...snapshotsIniciaisRef.current,
-        [chaveSnapshot]: true
+        [escopo]: true
       };
     };
 
     const unsub1 = onSnapshot(q1, (snap) => {
       const minhas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       registrarNotificacoesInApp(minhas, 'pessoais');
-      setNotificacoes(prev => {
-        const outras = prev.filter(p => p.escopoNotificacao === 'admins');
-        const listaFinal = [...outras, ...filtrarNaoLidas(minhas)];
-        return listaFinal.sort((a, b) => (b.data?.seconds || 0) - (a.data?.seconds || 0));
-      });
+      setNotificacoesPessoais(filtrarNaoLidas(minhas));
     });
-    unsubs.push(unsub1);
 
-    if (isAdmin) {
-      const q2 = query(collection(db, "notificacoes"), where("para", "==", "ADMINS"));
-      const unsub2 = onSnapshot(q2, (snap) => {
-        const deAdmin = snap.docs.map(d => ({ id: d.id, ...d.data(), escopoNotificacao: 'admins' }));
-        registrarNotificacoesInApp(deAdmin, 'admins');
-        setNotificacoes(prev => {
-          const pessoais = prev.filter(p => p.escopoNotificacao !== 'admins');
-          const listaFinal = [...pessoais, ...filtrarNaoLidas(deAdmin)];
-          return listaFinal.sort((a, b) => (b.data?.seconds || 0) - (a.data?.seconds || 0));
-        });
-      });
-      unsubs.push(unsub2);
-    }
-    return () => unsubs.forEach(u => u());
-  }, [user, isAdmin, notify]);
+    return () => unsub1();
+  }, [user, notify]);
+
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+
+    let ativo = true;
+
+    const sincronizarLegado = async () => {
+      try {
+        const deAdmin = await carregarNotificacoesAdminLegado();
+        if (!ativo) return;
+        setNotificacoesAdminLegado(deAdmin);
+      } catch (error) {
+        if (!ativo) return;
+        console.error("Erro ao verificar notificações legadas de admins:", error);
+      }
+    };
+
+    const handleFocus = () => {
+      void sincronizarLegado();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void sincronizarLegado();
+      }
+    };
+
+    void sincronizarLegado();
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      ativo = false;
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [carregarNotificacoesAdminLegado, isAdmin, user]);
+
+  useEffect(() => {
+    if (!user || !isAdmin || !isOpen) return;
+
+    const emailNormalizado = user.email.toLowerCase();
+    const q2 = query(collection(db, "notificacoes"), where("para", "==", "ADMINS"));
+
+    const unsub2 = onSnapshot(q2, (snap) => {
+      const deAdmin = snap.docs
+        .map(d => ({ id: d.id, ...d.data(), escopoNotificacao: 'admins' }))
+        .filter((notif) => !(Array.isArray(notif.lidaPor) && notif.lidaPor.includes(emailNormalizado)));
+      setNotificacoesAdminLegado(deAdmin);
+    });
+
+    return () => {
+      unsub2();
+    };
+  }, [isAdmin, isOpen, user]);
 
   const limparNotificacao = async (notif) => {
     try {
@@ -751,15 +904,33 @@ const SobreModal = ({ isOpen, onClose }) => {
   );
 };
 
-const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema }) => {
+const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema, listaInicial, onConsumirListaInicial }) => {
   const [lista, setLista] = useState([]);
   const [carregando, setCarregando] = useState(false);
   const [territorioProcessandoId, setTerritorioProcessandoId] = useState(null);
   const temaSistema = getSistemaTheme(contextoSistema);
   const { notify, confirm } = useUiFeedback();
+  const contextoIdAtual = contextoSistema?.contextoAtivoId || 'normal';
+  const carregarLista = useCallback(async () => {
+    if (!user?.email) return [];
+
+    const meusDocs = await carregarMeusTerritoriosDocs({
+      email: user.email,
+      contextoId: contextoIdAtual
+    });
+
+    return montarListaMeusTerritorios({ docs: meusDocs });
+  }, [contextoIdAtual, user?.email]);
 
   useEffect(() => {
     if (!isOpen || !user) return;
+
+    if (listaInicial?.contextoId === contextoIdAtual && listaInicial?.email === user.email) {
+      setLista(listaInicial.items);
+      setCarregando(false);
+      onConsumirListaInicial?.();
+      return;
+    }
 
     let ativo = true;
 
@@ -769,92 +940,7 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
       }
 
       try {
-        const meusDocs = [];
-
-        if (isNormalContext(contextoSistema?.contextoAtivoId)) {
-          const q = query(collection(db, "territorios"), where("designadoPara", "==", user.email));
-          const querySnapshot = await getDocs(q);
-          querySnapshot.forEach((territorioDoc) => meusDocs.push({ id: territorioDoc.id, ...territorioDoc.data() }));
-        } else {
-          const q = query(getTerritorioContextCollectionRef(db), where("contextoId", "==", contextoSistema.contextoAtivoId));
-          const querySnapshot = await getDocs(q);
-          querySnapshot.forEach((territorioDoc) => {
-            const data = territorioDoc.data();
-            if (data.designadoPara === user.email) {
-              meusDocs.push({ id: territorioDoc.id, ...data });
-            }
-          });
-        }
-
-        let listaCompleta = [];
-        if (meusDocs.length > 0) {
-          const geoData = await loadMapaData();
-          const featureMap = buildFeatureIndex(geoData);
-
-          listaCompleta = meusDocs.map((territorioDoc) => {
-            const numeroId = territorioDoc.territorioNumero || parseInt(String(territorioDoc.id).replace(/.*t_/, ''));
-            const feature = featureMap.get(numeroId);
-            const nome = normalizeTerritorioNome(
-              territorioDoc.nome || feature?.properties?.nome,
-              `Território ${numeroId}`
-            );
-            const boundsStr = getFeatureBoundsStr(feature);
-            const totalQuadras = getTerritorioQuadrasCount(feature);
-            const progresso = getTerritorioProgresso(territorioDoc, totalQuadras);
-            const quadrasFeitas = progresso.quadrasFeitasExibicao;
-            const quadrasRestantes = Math.max(totalQuadras - quadrasFeitas, 0);
-            const percentual = progresso.percentualExibicao;
-
-            let statusResumo = 'Em andamento';
-            let descricaoResumo = `${quadrasRestantes} quadra${quadrasRestantes === 1 ? '' : 's'} faltando`;
-            let barraClasse = 'bg-blue-600';
-            let badgeClasse = 'bg-amber-100 text-amber-700';
-
-            if (progresso.isAguardandoFinalizacao) {
-              statusResumo = 'Aguardando finalização';
-              descricaoResumo = 'Todas as quadras marcadas; falta confirmar a finalização';
-              barraClasse = 'bg-yellow-400';
-              badgeClasse = 'bg-yellow-100 text-yellow-700';
-            } else if (progresso.isFinalizado) {
-              statusResumo = 'Finalizado';
-              descricaoResumo = 'Território encerrado e aguardando nova liberação';
-              barraClasse = 'bg-green-500';
-              badgeClasse = 'bg-green-100 text-green-700';
-            }
-
-            let dataFormatada = "Data desc.";
-            let dataDesignacaoOrdenacao = 0;
-            if (territorioDoc.dataDesignacao) {
-              const d = territorioDoc.dataDesignacao.toDate ? territorioDoc.dataDesignacao.toDate() : new Date(territorioDoc.dataDesignacao);
-              dataFormatada = d.toLocaleDateString('pt-BR');
-              dataDesignacaoOrdenacao = d.getTime();
-            }
-
-            return {
-              ...territorioDoc,
-              numeroId,
-              nome,
-              boundsStr,
-              dataFormatada,
-              dataDesignacaoOrdenacao,
-              totalQuadras,
-              quadrasFeitas,
-              quadrasRestantes,
-              percentual,
-              statusResumo,
-              descricaoResumo,
-              barraClasse,
-              badgeClasse,
-              podeFinalizarDireto: progresso.isAguardandoFinalizacao && Boolean(territorioDoc.designadoPara)
-            };
-          });
-        }
-
-        listaCompleta.sort((a, b) => {
-          const diffTempo = a.dataDesignacaoOrdenacao - b.dataDesignacaoOrdenacao;
-          if (diffTempo !== 0) return diffTempo;
-          return a.numeroId - b.numeroId;
-        });
+        const listaCompleta = await carregarLista();
         if (ativo) {
           setLista(listaCompleta);
         }
@@ -875,7 +961,7 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
     return () => {
       ativo = false;
     };
-  }, [contextoSistema, isOpen, user]);
+  }, [carregarLista, contextoIdAtual, isOpen, listaInicial, onConsumirListaInicial, user]);
 
   const irParaMapa = (item) => {
     if (item.boundsStr) {
@@ -908,7 +994,6 @@ const MeusTerritoriosModal = ({ isOpen, onClose, user, navigate, contextoSistema
         salvarEstadoTerritorio,
         dadosBanco: item,
         nome: item.nome || `Território ${item.numeroId}`,
-        db,
         contextoSistema
       });
 
@@ -1760,6 +1845,7 @@ function Dashboard() {
   const [pushStatus, setPushStatus] = useState('oculto');
   const [ativandoPush, setAtivandoPush] = useState(false);
   const [statusSyncAberto, setStatusSyncAberto] = useState(false);
+  const [meusTerritoriosPrecarregados, setMeusTerritoriosPrecarregados] = useState(null);
   const { notify } = useUiFeedback();
 
   useEffect(() => {
@@ -1869,21 +1955,19 @@ function Dashboard() {
 
     const verificarSeTemTerritorios = async () => {
       try {
-        let querySnapshot;
+        const contextoId = contextoSistema?.contextoAtivoId || 'normal';
+        const meusDocs = await carregarMeusTerritoriosDocs({
+          email: user.email,
+          contextoId
+        });
 
-        if (isNormalContext(contextoSistema?.contextoAtivoId)) {
-          const q = query(collection(db, "territorios"), where("designadoPara", "==", user.email));
-          querySnapshot = await getDocs(q);
-        } else {
-          const q = query(
-            getTerritorioContextCollectionRef(db),
-            where("contextoId", "==", contextoSistema.contextoAtivoId),
-            where("designadoPara", "==", user.email)
-          );
-          querySnapshot = await getDocs(q);
-        }
-
-        if (ativo && !querySnapshot.empty) {
+        if (ativo && meusDocs.length > 0) {
+          const items = await montarListaMeusTerritorios({ docs: meusDocs });
+          setMeusTerritoriosPrecarregados({
+            email: user.email,
+            contextoId,
+            items
+          });
           setMeusTerritoriosAberto(true);
         }
       } catch (error) {
@@ -2028,6 +2112,8 @@ function Dashboard() {
         user={user}
         navigate={navigate}
         contextoSistema={contextoSistema}
+        listaInicial={meusTerritoriosPrecarregados}
+        onConsumirListaInicial={() => setMeusTerritoriosPrecarregados(null)}
       />
       <ModalConfirmacaoLogout
         isOpen={confirmarLogoutAberto}

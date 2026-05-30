@@ -1,12 +1,8 @@
 import {
     arrayUnion,
-    collection,
     doc,
     getDocFromServer,
-    getDocs,
-    query,
     runTransaction,
-    where
 } from 'firebase/firestore';
 import {
     buildTerritorioStateMergeSeed,
@@ -143,11 +139,7 @@ function buildFinalizacaoPayload({ dadosBanco, responsavelNome, agora }) {
     };
 }
 
-async function enviarNotificacaoFinalizacao({ db, nome, responsavelNome, contextoSistema }) {
-    const adminsQuery = query(collection(db, 'usuarios'), where('role', '==', 'admin'));
-    const adminsSnapshot = await getDocs(adminsQuery);
-    if (adminsSnapshot.empty) return;
-
+async function enviarNotificacaoFinalizacao({ nome, responsavelNome, contextoSistema }) {
     const texto = `🏁 O Território ${nome} foi finalizado por ${responsavelNome}${buildContextoSufixo(contextoSistema)}.`;
 
     await enviarEventoNotificacao({
@@ -292,7 +284,6 @@ async function syncFinalizationConfirmAction({ db, action }) {
     });
 
     await enviarNotificacaoFinalizacao({
-        db,
         nome: action.territorioNome,
         responsavelNome: finalizacaoMeta.responsavelNome,
         contextoSistema: getActionContextSeed(action)
@@ -470,7 +461,7 @@ export function processTerritorioOutbox({ db, userEmail }) {
     return syncInFlight;
 }
 
-export async function finalizarTerritorioDesignado({ salvarEstadoTerritorio, dadosBanco, nome, db, contextoSistema }) {
+export async function finalizarTerritorioDesignado({ salvarEstadoTerritorio, dadosBanco, nome, contextoSistema }) {
     if (!dadosBanco?.designadoPara) {
         return { ok: false, motivo: 'sem_designacao' };
     }
@@ -487,7 +478,6 @@ export async function finalizarTerritorioDesignado({ salvarEstadoTerritorio, dad
     }));
 
     await enviarNotificacaoFinalizacao({
-        db,
         nome: nomeNormalizado,
         responsavelNome,
         contextoSistema

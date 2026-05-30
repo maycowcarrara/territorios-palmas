@@ -24,7 +24,8 @@ def publicAppUrl = instanceProperties['publicAppUrl'] ?: ''
 def authDomain = instanceProperties['authDomain'] ?: ''
 def publicAppUri = publicAppUrl ? new URI(publicAppUrl) : null
 def publicAppScheme = 'https'
-def publicAppHost = authDomain ?: publicAppUri?.host ?: ''
+def publicAppHost = publicAppUri?.host ?: authDomain ?: ''
+def secondaryPublicAppHost = (authDomain && authDomain != publicAppHost) ? authDomain : publicAppHost
 
 android {
     namespace "br.com.territoriospalmas.app"
@@ -49,8 +50,8 @@ android {
         applicationId activeApplicationId
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 310
-        versionName "2.5.310"
+        versionCode 319
+        versionName "2.6.319"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resValue "string", "app_name", activeAppName
         resValue "string", "title_activity_main", activeAppName
@@ -59,7 +60,8 @@ android {
         manifestPlaceholders = [
             appLabel: activeAppName,
             magicLinkScheme: publicAppScheme,
-            magicLinkHost: publicAppHost
+            magicLinkHost: publicAppHost,
+            magicLinkSecondaryHost: secondaryPublicAppHost
         ]
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

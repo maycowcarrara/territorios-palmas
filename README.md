@@ -267,6 +267,13 @@ O Firebase Hosting usa o target `app` em [firebase.json](./firebase.json), e o t
 
 Cada arquivo de ambiente também deve definir `VITE_PUBLIC_APP_URL` e `VITE_LIVE_UPDATE_MANIFEST_URL` apontando para o Hosting da própria congregação. O app usa `VITE_PUBLIC_APP_URL` ao gerar links compartilháveis no WhatsApp e em PDFs; se ela ficar vazia, o fallback tenta inferir a URL a partir de `VITE_LIVE_UPDATE_MANIFEST_URL`.
 
+Para login por link mágico no Android, a instância ativa também precisa manter coerentes:
+
+- `VITE_PUBLIC_APP_URL`, porque o link continua/retorno do e-mail usa esse Hosting.
+- `VITE_FIREBASE_AUTH_DOMAIN`, porque o Firebase pode resolver o App Link pelo domínio `firebaseapp.com`.
+
+O APK registra os dois hosts (`web.app` e `firebaseapp.com`, quando forem diferentes) para que o toque no e-mail volte ao app em vez de cair só no navegador. Se mudar qualquer um desses domínios, rode uma nova sincronização/build Android além do deploy web.
+
 Cada instância também pode apontar para um mapa próprio com `VITE_MAPA_URL`. Para o General, use `./mapa.general.json`; enquanto o mapa real não estiver pronto, esse arquivo pode ser uma `FeatureCollection` vazia.
 
 ### Notificações

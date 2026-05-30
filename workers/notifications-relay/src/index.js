@@ -515,17 +515,6 @@ const podeUsuarioNotificarAdmins = ({ usuarioRemetente, tipo, origem }) => {
 };
 
 const buildNotificacoesBroadcast = (destino, mensagem, agora, destinatarios) => {
-    if (destino === 'admins') {
-        return [{
-            para: 'ADMINS',
-            texto: mensagem,
-            data: agora,
-            lida: false,
-            tipo: 'comunicado',
-            origem: 'admin'
-        }];
-    }
-
     return destinatarios.map((user) => ({
         para: user.id,
         texto: mensagem,
@@ -536,14 +525,14 @@ const buildNotificacoesBroadcast = (destino, mensagem, agora, destinatarios) => 
     }));
 };
 
-const buildNotificacaoAvulsa = (notificacao, agora) => [{
-    para: notificacao.para,
+const buildNotificacaoAvulsa = (notificacao, agora, destinatarios) => destinatarios.map((user) => ({
+    para: user.id,
     texto: notificacao.texto,
     data: agora,
     lida: false,
     tipo: notificacao.tipo || 'sistema',
     origem: notificacao.origem || 'sistema'
-}];
+}));
 
 const getPushConfigBroadcast = (destino) => ({
     titulo: destino === 'admins' ? 'Comunicado para administradores' : 'Comunicado do Territórios',
@@ -770,7 +759,7 @@ export default {
                     texto,
                     tipo,
                     origem
-                }, agora);
+                }, agora, destinatarios);
                 await escreverNotificacoes(env, accessToken, notificacoesInternas);
 
                 const pushConfig = getPushConfigNotificacao({ para, tipo, tituloPush });

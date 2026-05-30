@@ -38,6 +38,10 @@
                     android:scheme="${magicLinkScheme}"
                     android:host="${magicLinkHost}"
                     android:pathPrefix="/__/auth/links" />
+                <data
+                    android:scheme="${magicLinkScheme}"
+                    android:host="${magicLinkSecondaryHost}"
+                    android:pathPrefix="/__/auth/links" />
             </intent-filter>
 
         </activity>

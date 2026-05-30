@@ -351,15 +351,26 @@ const AdminPanel = () => {
             } else {
                 const agora = new Date();
                 if (destinoComunicado === 'admins') {
-                    const notificacaoRef = doc(collection(db, "notificacoes"));
-                    await setDoc(notificacaoRef, {
-                        para: 'ADMINS',
-                        texto: mensagem,
-                        data: agora,
-                        lida: false,
-                        tipo: 'comunicado',
-                        origem: 'admin'
-                    });
+                    const batchSize = 400;
+
+                    for (let index = 0; index < admins.length; index += batchSize) {
+                        const batch = writeBatch(db);
+                        admins
+                            .slice(index, index + batchSize)
+                            .forEach((admin) => {
+                                const notificacaoRef = doc(collection(db, "notificacoes"));
+                                batch.set(notificacaoRef, {
+                                    para: admin.id,
+                                    texto: mensagem,
+                                    data: agora,
+                                    lida: false,
+                                    tipo: 'comunicado',
+                                    origem: 'admin'
+                                });
+                            });
+
+                        await batch.commit();
+                    }
                 } else {
                     const batchSize = 400;
 
