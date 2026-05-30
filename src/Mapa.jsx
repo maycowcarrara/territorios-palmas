@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker, Polyline } from 'react-leaflet';
-import { onSnapshot, setDoc, deleteDoc, doc, arrayUnion, collection, getDocs, addDoc } from 'firebase/firestore';
+import { onSnapshot, setDoc, deleteDoc, doc, arrayUnion, collection, getDocs } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { db } from './firebase';
@@ -33,7 +33,7 @@ import { buildAppLocationUrl, buildGoogleMapsUrl, buildLocationShareText, buildW
 import { extractTerritorioCodigo, normalizeTerritorioNome } from './territorioNome';
 import L from 'leaflet';
 import { useUiFeedback } from './uiFeedback';
-import { enviarEventoNotificacaoPeloRelay, relayDisponivel } from './notificationRelay';
+import { enviarEventoNotificacao } from './notificationRelay';
 
 // --- CSS ---
 const cssTooltip = `
@@ -1423,17 +1423,13 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                 await salvarEstadoTerritorio(updateData);
                 try {
                     const texto = `Território ${nome} devolvido${contextoSufixo}.`;
-                    if (relayDisponivel()) {
-                        await enviarEventoNotificacaoPeloRelay({
-                            para: 'ADMINS',
-                            texto,
-                            tipo: 'devolucao',
-                            origem: 'sistema',
-                            tituloPush: 'Território devolvido'
-                        });
-                    } else {
-                        await addDoc(collection(db, "notificacoes"), { para: "ADMINS", texto, data: new Date(), lida: false, tipo: 'devolucao' });
-                    }
+                    await enviarEventoNotificacao({
+                        para: 'ADMINS',
+                        texto,
+                        tipo: 'devolucao',
+                        origem: 'sistema',
+                        tituloPush: 'Território devolvido'
+                    });
                 } catch (error) {
                     console.error("Erro ao enviar notificação de devolução:", error);
                 }

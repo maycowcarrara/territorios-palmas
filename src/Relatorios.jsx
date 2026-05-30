@@ -529,7 +529,7 @@ const Relatorios = () => {
                         <button 
                             onClick={exportarPDF} 
                             disabled={exportandoPdf}
-                            className={buttonClass('dangerSoft', 'group order-2 justify-start text-left disabled:cursor-wait sm:order-1')}
+                            className={buttonClass('dangerSoft', 'group order-2 disabled:cursor-wait sm:order-1')}
                             title={exportandoPdf ? "Gerando PDF..." : "Baixar Relatório em PDF"}
                         >
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white ring-1 ring-red-200">
@@ -539,8 +539,8 @@ const Relatorios = () => {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.1} d="m12 10.5 2.25 2.25L12 15m2.25-2.25H8.75" />
                                 </svg>
                             </span>
-                            <span className="min-w-0 flex-1">
-                                <span className="flex items-center gap-2">
+                            <span className="min-w-0 flex-1 text-center">
+                                <span className="flex items-center justify-center gap-2">
                                     <span className="text-sm font-extrabold tracking-[0.06em] uppercase">Baixar PDF</span>
                                     <span className="rounded-full border border-red-200 bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-red-600">
                                         PDF

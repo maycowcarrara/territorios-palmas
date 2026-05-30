@@ -161,15 +161,6 @@ const AdminPanel = () => {
             return;
         }
 
-        if (!novoEmail.includes('@gmail.com')) {
-            notify({
-                title: 'Use um Gmail',
-                message: 'Use um e-mail @gmail.com para manter a compatibilidade com o login.',
-                variant: 'warning'
-            });
-            return;
-        }
-
         const whatsLimpo = novoWhats.replace(/\D/g, '');
         if (novoWhats && (whatsLimpo.length < 10 || whatsLimpo.length > 11)) {
             notify({
@@ -792,10 +783,10 @@ const AdminPanel = () => {
                                                 />
                                             </div>
                                             <div>
-                                                <label className="mb-1 block text-xs font-bold uppercase text-slate-500">E-mail (Google)</label>
+                                                <label className="mb-1 block text-xs font-bold uppercase text-slate-500">E-mail</label>
                                                 <input
                                                     type="email"
-                                                    placeholder="Ex: joao@gmail.com"
+                                                    placeholder="Ex: joao@exemplo.com"
                                                     className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                                                     value={novoEmail}
                                                     onChange={(e) => setNovoEmail(e.target.value)}

@@ -6,6 +6,16 @@ import { arrayUnion, collection, query, where, getDocs, onSnapshot, doc, setDoc,
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { signInWithGoogleNative, signOutGoogleNative } from './nativeGoogleAuth';
+import {
+  completeMagicLinkSignIn,
+  consumePendingMagicLinkUrl,
+  getMagicLinkFromCurrentUrl,
+  getRememberedMagicLinkEmail,
+  isMagicLinkSignInUrl,
+  isValidAuthEmail,
+  rememberPendingMagicLinkUrl,
+  sendMagicLink
+} from './emailLinkAuth';
 import { ativarPushNotifications, desativarPushNotifications, describePushActivationError } from './pushNotifications';
 import { useUsuario } from './useUsuario';
 import appInfo from './version.json';
@@ -58,9 +68,15 @@ if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
 // --- TELA DE LOGIN ---
 function Login() {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
+  const [loadingGoogle, setLoadingGoogle] = useState(false);
+  const [loadingMagicLink, setLoadingMagicLink] = useState(false);
   const [verificandoSessao, setVerificandoSessao] = useState(true);
   const [erro, setErro] = useState('');
+  const [info, setInfo] = useState('');
+  const [email, setEmail] = useState('');
+  const [emailConfirmacao, setEmailConfirmacao] = useState('');
+  const [magicLinkUrl, setMagicLinkUrl] = useState('');
+  const [aguardandoConfirmacaoEmail, setAguardandoConfirmacaoEmail] = useState(false);
 
   const extrairMensagemErroGoogle = (error) => {
     const partes = [
@@ -104,6 +120,37 @@ function Login() {
     return `Erro ao conectar com Google: ${mensagem}`;
   };
 
+  const extrairMensagemErroMagicLink = (error) => {
+    const mensagem = String(error?.message || error || '');
+
+    if (!mensagem) {
+      return 'Não foi possível concluir o login por e-mail. Tente novamente.';
+    }
+
+    if (mensagem.includes('invalid-email')) {
+      return 'O e-mail informado parece inválido. Revise e tente novamente.';
+    }
+
+    if (mensagem.includes('missing-continue-uri') || mensagem.includes('VITE_PUBLIC_APP_URL')) {
+      return 'O link mágico ainda não foi configurado corretamente neste ambiente.';
+    }
+
+    if (
+      mensagem.includes('invalid-action-code')
+      || mensagem.includes('expired-action-code')
+      || mensagem.includes('invalid-oob-code')
+      || mensagem.includes('invalid-email-link')
+    ) {
+      return 'Esse link expirou, já foi usado ou não é válido. Solicite um novo link para entrar.';
+    }
+
+    if (mensagem.includes('user-disabled')) {
+      return 'Esta conta foi desativada. Fale com um administrador.';
+    }
+
+    return `Erro ao entrar com link mágico: ${mensagem}`;
+  };
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -115,9 +162,62 @@ function Login() {
     return () => unsubscribe();
   }, [navigate]);
 
+  useEffect(() => {
+    let ativo = true;
+
+    const processarLinkPendente = async () => {
+      if (auth.currentUser) return;
+
+      const linkPendente = consumePendingMagicLinkUrl() || getMagicLinkFromCurrentUrl();
+      if (!linkPendente) return;
+
+      setMagicLinkUrl(linkPendente);
+      setErro('');
+      setInfo('');
+
+      const emailGuardado = getRememberedMagicLinkEmail();
+      if (!emailGuardado) {
+        setAguardandoConfirmacaoEmail(true);
+        setVerificandoSessao(false);
+        return;
+      }
+
+      setLoadingMagicLink(true);
+
+      try {
+        await completeMagicLinkSignIn({
+          email: emailGuardado,
+          emailLink: linkPendente
+        });
+
+        if (ativo) {
+          navigate('/app', { replace: true });
+        }
+      } catch (error) {
+        console.error(error);
+
+        if (ativo) {
+          setErro(extrairMensagemErroMagicLink(error));
+          setVerificandoSessao(false);
+        }
+      } finally {
+        if (ativo) {
+          setLoadingMagicLink(false);
+        }
+      }
+    };
+
+    void processarLinkPendente();
+
+    return () => {
+      ativo = false;
+    };
+  }, [navigate]);
+
   const handleGoogleLogin = async () => {
-    setLoading(true);
+    setLoadingGoogle(true);
     setErro('');
+    setInfo('');
     try {
       if (Capacitor.isNativePlatform()) {
         await signInWithGoogleNative();
@@ -130,7 +230,67 @@ function Login() {
     } catch (error) {
       console.error(error);
       setErro(extrairMensagemErroGoogle(error));
-      setLoading(false);
+    } finally {
+      setLoadingGoogle(false);
+    }
+  };
+
+  const handleEnviarMagicLink = async (event) => {
+    event.preventDefault();
+
+    if (!isValidAuthEmail(email)) {
+      setErro('Informe um e-mail válido para receber o link mágico.');
+      setInfo('');
+      return;
+    }
+
+    setLoadingMagicLink(true);
+    setErro('');
+    setInfo('');
+
+    try {
+      const normalized = await sendMagicLink(email);
+      setEmail(normalized);
+      setAguardandoConfirmacaoEmail(false);
+      setInfo(`Enviamos um link de acesso para ${normalized}. Abra o e-mail, toque no link e volte para o app.`);
+    } catch (error) {
+      console.error(error);
+      setErro(extrairMensagemErroMagicLink(error));
+    } finally {
+      setLoadingMagicLink(false);
+    }
+  };
+
+  const handleConfirmarMagicLink = async (event) => {
+    event.preventDefault();
+
+    if (!magicLinkUrl || !isMagicLinkSignInUrl(magicLinkUrl)) {
+      setErro('Não encontramos um link mágico pendente neste dispositivo. Solicite um novo link.');
+      setInfo('');
+      return;
+    }
+
+    if (!isValidAuthEmail(emailConfirmacao)) {
+      setErro('Confirme o mesmo e-mail usado para solicitar o link.');
+      setInfo('');
+      return;
+    }
+
+    setLoadingMagicLink(true);
+    setErro('');
+    setInfo('');
+
+    try {
+      await completeMagicLinkSignIn({
+        email: emailConfirmacao,
+        emailLink: magicLinkUrl
+      });
+      navigate('/app', { replace: true });
+    } catch (error) {
+      console.error(error);
+      setErro(extrairMensagemErroMagicLink(error));
+    } finally {
+      setLoadingMagicLink(false);
     }
   };
 
@@ -159,10 +319,10 @@ function Login() {
           <div className="flex flex-col gap-4">
             <button
               onClick={handleGoogleLogin}
-              disabled={loading}
+              disabled={loadingGoogle || loadingMagicLink}
               className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-bold py-3 px-4 rounded-lg transition-all shadow-sm active:scale-95"
             >
-              {loading ? (
+              {loadingGoogle ? (
                 <span className="text-sm">Conectando...</span>
               ) : (
                 <>
@@ -176,7 +336,62 @@ function Login() {
                 </>
               )}
             </button>
-            {erro && <p className="text-red-500 text-xs mt-2">{erro}</p>}
+            <div className="flex items-center gap-3 py-1 text-xs uppercase tracking-[0.18em] text-gray-400">
+              <span className="h-px flex-1 bg-gray-200"></span>
+              ou
+              <span className="h-px flex-1 bg-gray-200"></span>
+            </div>
+            {aguardandoConfirmacaoEmail ? (
+              <form onSubmit={handleConfirmarMagicLink} className="flex flex-col gap-3 text-left">
+                <label className="text-xs font-bold uppercase tracking-[0.18em] text-gray-500">
+                  Confirme seu e-mail
+                </label>
+                <input
+                  type="email"
+                  value={emailConfirmacao}
+                  onChange={(event) => setEmailConfirmacao(event.target.value)}
+                  placeholder="voce@exemplo.com"
+                  autoComplete="email"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+                <button
+                  type="submit"
+                  disabled={loadingMagicLink || loadingGoogle}
+                  className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMagicLink ? 'Concluindo login...' : 'Concluir com link mágico'}
+                </button>
+                <p className="text-xs text-gray-500">
+                  Esse passo é necessário quando o link foi aberto em outro dispositivo ou navegador.
+                </p>
+              </form>
+            ) : (
+              <form onSubmit={handleEnviarMagicLink} className="flex flex-col gap-3 text-left">
+                <label className="text-xs font-bold uppercase tracking-[0.18em] text-gray-500">
+                  Entrar com link mágico
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="voce@exemplo.com"
+                  autoComplete="email"
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm text-gray-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+                <button
+                  type="submit"
+                  disabled={loadingMagicLink || loadingGoogle}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMagicLink ? 'Enviando link...' : 'Receber link por e-mail'}
+                </button>
+                <p className="text-xs text-gray-500">
+                  O acesso continua sujeito à aprovação do administrador para o e-mail informado.
+                </p>
+              </form>
+            )}
+            {erro && <p className="text-red-500 text-xs mt-1">{erro}</p>}
+            {info && <p className="text-emerald-600 text-xs mt-1">{info}</p>}
             <div className="pt-2 text-xs text-gray-500">
               <p className="mb-2">Ao continuar, você concorda com os Termos de Uso e com a Política de Privacidade do aplicativo.</p>
               <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
@@ -1719,7 +1934,7 @@ function Dashboard() {
             </div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2">Cadastro em Análise</h2>
             <p className="text-gray-600 mb-6 leading-relaxed">
-              Olá, <strong>{user.displayName}</strong>! <br />
+              Olá, <strong>{user.displayName || user.email}</strong>! <br />
               Seu acesso já foi solicitado e notificamos os administradores.
               <br /><br />
               <span className="text-sm bg-blue-50 text-blue-700 py-1 px-3 rounded-full">
@@ -2009,6 +2224,52 @@ function LazyPage({ children }) {
 const APP_ROUTE = '/app';
 const BACK_TO_EXIT_WINDOW_MS = 5000;
 
+function MagicLinkOpenHandler() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      return undefined;
+    }
+
+    let ativo = true;
+    let listenerHandle = null;
+
+    const registrarLink = (url) => {
+      if (!isMagicLinkSignInUrl(url)) return;
+
+      rememberPendingMagicLinkUrl(url);
+      navigate('/', { replace: true });
+    };
+
+    const registrar = async () => {
+      try {
+        const launchData = await CapacitorApp.getLaunchUrl();
+        if (ativo && launchData?.url) {
+          registrarLink(launchData.url);
+        }
+      } catch (error) {
+        console.warn('Não foi possível verificar a URL inicial do app:', error);
+      }
+
+      listenerHandle = await CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+        registrarLink(url);
+      });
+    };
+
+    void registrar();
+
+    return () => {
+      ativo = false;
+      if (listenerHandle) {
+        void listenerHandle.remove();
+      }
+    };
+  }, [navigate]);
+
+  return null;
+}
+
 function BackButtonExitHandler() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -2125,6 +2386,7 @@ function App() {
   return (
     <UiFeedbackProvider>
       <HashRouter>
+        <MagicLinkOpenHandler />
         <BackButtonExitHandler />
         <AutoUpdate />
         <Routes>

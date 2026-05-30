@@ -27,6 +27,12 @@ service cloud.firestore {
              (getDadosUsuario().role == 'admin' || getDadosUsuario().role == 'comum');
     }
 
+    function isAguardando() {
+      return estaLogado() &&
+             exists(/databases/$(database)/documents/usuarios/$(meuEmail())) &&
+             getDadosUsuario().role == 'aguardando';
+    }
+
     function camposAlteradosApenas(camposPermitidos) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(camposPermitidos);
     }
@@ -197,7 +203,27 @@ service cloud.firestore {
              ]) &&
              request.resource.data.para is string &&
              request.resource.data.texto is string &&
+             request.resource.data.data is timestamp &&
+             request.resource.data.lida is bool &&
              request.resource.data.texto.size() <= 2000;
+    }
+
+    function podeCriarNotificacaoAdminSistemaDireta() {
+      return estaLogado() &&
+             notificacaoValida() &&
+             request.resource.data.para == 'ADMINS' &&
+             request.resource.data.origem == 'sistema' &&
+             request.resource.data.lida == false &&
+             !request.resource.data.keys().hasAny(['lidaPor']) &&
+             (
+               (isAguardando() && request.resource.data.tipo == 'cadastro') ||
+               (isAprovado() &&
+                 (
+                   request.resource.data.tipo == 'conclusao' ||
+                   request.resource.data.tipo == 'devolucao'
+                 )
+               )
+             );
     }
 
     function atualizaLeituraNotificacao() {
@@ -274,7 +300,7 @@ service cloud.firestore {
         estaLogado() &&
         notificacaoValida() &&
         request.resource.data.para == meuEmail()
-      );
+      ) || podeCriarNotificacaoAdminSistemaDireta();
 
       allow update: if atualizaLeituraNotificacao() ||
                     atualizaLeituraNotificacaoAdmin();

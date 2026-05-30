@@ -1,5 +1,4 @@
 import {
-    addDoc,
     arrayUnion,
     collection,
     doc,
@@ -24,7 +23,7 @@ import {
     updateOutboxAction
 } from './offlineOutbox';
 import { getTerritorioNotasCollectionRef } from './territorioNotes';
-import { enviarEventoNotificacaoPeloRelay, relayDisponivel } from './notificationRelay';
+import { enviarEventoNotificacao } from './notificationRelay';
 import { isOutboxActionRetryable, TERRITORIO_ACTION_TYPE } from './territorioOfflineModel';
 import { normalizeTerritorioNome } from './territorioNome';
 
@@ -144,31 +143,19 @@ function buildFinalizacaoPayload({ dadosBanco, responsavelNome, agora }) {
     };
 }
 
-async function enviarNotificacaoFinalizacao({ db, nome, responsavelNome, contextoSistema, agora }) {
+async function enviarNotificacaoFinalizacao({ db, nome, responsavelNome, contextoSistema }) {
     const adminsQuery = query(collection(db, 'usuarios'), where('role', '==', 'admin'));
     const adminsSnapshot = await getDocs(adminsQuery);
     if (adminsSnapshot.empty) return;
 
     const texto = `🏁 O Território ${nome} foi finalizado por ${responsavelNome}${buildContextoSufixo(contextoSistema)}.`;
 
-    if (relayDisponivel()) {
-        await enviarEventoNotificacaoPeloRelay({
-            para: 'ADMINS',
-            texto,
-            tipo: 'conclusao',
-            origem: 'sistema',
-            tituloPush: 'Território finalizado'
-        });
-        return;
-    }
-
-    await addDoc(collection(db, 'notificacoes'), {
+    await enviarEventoNotificacao({
         para: 'ADMINS',
         texto,
-        data: agora,
-        lida: false,
         tipo: 'conclusao',
-        origem: 'sistema'
+        origem: 'sistema',
+        tituloPush: 'Território finalizado'
     });
 }
 
@@ -300,8 +287,7 @@ async function syncFinalizationConfirmAction({ db, action }) {
         }, { merge: true });
 
         return {
-            responsavelNome,
-            agora
+            responsavelNome
         };
     });
 
@@ -309,8 +295,7 @@ async function syncFinalizationConfirmAction({ db, action }) {
         db,
         nome: action.territorioNome,
         responsavelNome: finalizacaoMeta.responsavelNome,
-        contextoSistema: getActionContextSeed(action),
-        agora: finalizacaoMeta.agora
+        contextoSistema: getActionContextSeed(action)
     });
 }
 
@@ -505,8 +490,7 @@ export async function finalizarTerritorioDesignado({ salvarEstadoTerritorio, dad
         db,
         nome: nomeNormalizado,
         responsavelNome,
-        contextoSistema,
-        agora
+        contextoSistema
     });
 
     return {

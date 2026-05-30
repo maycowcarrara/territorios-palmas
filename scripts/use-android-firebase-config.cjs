@@ -24,6 +24,27 @@ const sourceCandidates = [
 const sourcePath = sourceCandidates.find((candidate) => fs.existsSync(candidate));
 const targetPath = path.join(androidAppDir, 'google-services.json');
 const instancePropertiesPath = path.join(androidAppDir, 'territorios-instance.properties');
+const instanceEnvPath = path.join(projectRoot, `.env.${instance}`);
+
+function readEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+
+  const result = {};
+
+  for (const line of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex === -1) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    result[key] = value;
+  }
+
+  return result;
+}
 
 if (!sourcePath) {
   console.error(`Arquivo nao encontrado para a instancia: ${instance}`);
@@ -61,6 +82,9 @@ const instanceLabel = instance
 const appName = instance === 'palmas'
   ? 'Territórios Palmas'
   : `Territórios ${instanceLabel}`;
+const instanceEnv = readEnvFile(instanceEnvPath);
+const publicAppUrl = instanceEnv.VITE_PUBLIC_APP_URL || '';
+const authDomain = instanceEnv.VITE_FIREBASE_AUTH_DOMAIN || '';
 
 fs.writeFileSync(
   instancePropertiesPath,
@@ -69,6 +93,8 @@ fs.writeFileSync(
     `applicationId=${packageName}`,
     `appName=${appName}`,
     `firebaseProjectId=${projectId}`,
+    `publicAppUrl=${publicAppUrl}`,
+    `authDomain=${authDomain}`,
     ''
   ].join('\n')
 );

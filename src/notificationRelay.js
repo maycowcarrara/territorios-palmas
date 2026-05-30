@@ -1,4 +1,5 @@
-import { auth } from './firebase';
+import { addDoc, collection } from 'firebase/firestore';
+import { auth, db } from './firebase';
 
 const relayUrl = import.meta.env.VITE_NOTIFICATIONS_RELAY_URL || '';
 
@@ -61,3 +62,40 @@ export const enviarEventoNotificacaoPeloRelay = async ({
             tituloPush
         }
     });
+
+export const enviarEventoNotificacao = async ({
+    para,
+    texto,
+    tipo = 'sistema',
+    origem = 'sistema',
+    tituloPush = 'Territórios'
+}) => {
+    if (relayDisponivel()) {
+        try {
+            return await enviarEventoNotificacaoPeloRelay({
+                para,
+                texto,
+                tipo,
+                origem,
+                tituloPush
+            });
+        } catch (error) {
+            console.warn('Relay de notificações indisponível. Tentando fallback no Firestore.', error);
+        }
+    }
+
+    await addDoc(collection(db, 'notificacoes'), {
+        para,
+        texto,
+        data: new Date(),
+        lida: false,
+        tipo,
+        origem
+    });
+
+    return {
+        ok: true,
+        action: 'notify',
+        channel: 'firestore-fallback'
+    };
+};
