@@ -5,7 +5,7 @@ import { onSnapshot, setDoc, deleteDoc, doc, arrayUnion, collection, getDocs } f
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { db } from './firebase';
-import { loadMapaData } from './mapData';
+import { clearMapaDataCache, loadMapaData } from './mapData';
 import { getFeatureId } from './mapaUtils';
 import {
     buildBaseTerritorioDefaults,
@@ -1767,6 +1767,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
 // --- MAPA PRINCIPAL ---
 const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
+    const [mapaErro, setMapaErro] = useState('');
     const [zoomLevel, setZoomLevel] = useState(MAP_INITIAL_ZOOM);
     const [listaUsuarios, setListaUsuarios] = useState([]);
     const [posicaoUsuario, setPosicaoUsuario] = useState(null);
@@ -1778,6 +1779,7 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
     const [showRefs, setShowRefs] = useState(false);
     const [showCondos, setShowCondos] = useState(true);
     const [mostrarDicasControles, setMostrarDicasControles] = useState(true);
+    const [tentativaMapa, setTentativaMapa] = useState(0);
 
     const tiposPontosDisponiveis = useMemo(() => {
         const todosPontos = geoJsonData?.features?.flatMap((feature) => feature.properties?.pontos || []) || [];
@@ -1794,9 +1796,24 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
     }, [geoJsonData, tiposPontosDisponiveis.hasCondominios, tiposPontosDisponiveis.hasReferencias]);
 
     useEffect(() => {
+        let ativo = true;
+
+        setMapaErro('');
+        setGeoJsonData(null);
+
         loadMapaData()
-            .then((data) => setGeoJsonData(data))
-            .catch((error) => console.error("Erro ao carregar mapa:", error));
+            .then((data) => {
+                if (!ativo) return;
+                setGeoJsonData(data);
+            })
+            .catch((error) => {
+                console.error("Erro ao carregar mapa:", error);
+                clearMapaDataCache();
+
+                if (!ativo) return;
+
+                setMapaErro('Não foi possível carregar o mapa agora. Tente novamente.');
+            });
 
         const carregarUsuarios = async () => {
             if (!isAdmin) return;
@@ -1808,7 +1825,11 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
             } catch (e) { console.error(e); }
         };
         carregarUsuarios();
-    }, [isAdmin]);
+
+        return () => {
+            ativo = false;
+        };
+    }, [isAdmin, tentativaMapa]);
 
     useEffect(() => {
         const timer = window.setTimeout(() => setMostrarDicasControles(false), 4000);
@@ -1836,7 +1857,18 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
     return (
         <div className="h-full w-full relative">
             <style>{cssTooltip}</style>
-            {!geoJsonData ? (
+            {mapaErro ? (
+                <div className="flex h-full flex-col items-center justify-center gap-4 bg-gray-100 px-6 text-center">
+                    <p className="max-w-sm text-sm font-semibold text-slate-700">{mapaErro}</p>
+                    <button
+                        type="button"
+                        onClick={() => setTentativaMapa((atual) => atual + 1)}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-700"
+                    >
+                        Tentar novamente
+                    </button>
+                </div>
+            ) : !geoJsonData ? (
                 <div className="flex h-full items-center justify-center bg-gray-100"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>
             ) : (
                 <MapContainer center={MAP_INITIAL_CENTER} zoom={MAP_INITIAL_ZOOM} maxZoom={22} zoomControl={false} className="h-full w-full z-0">

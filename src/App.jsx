@@ -7,6 +7,8 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { signInWithGoogleNative, signOutGoogleNative } from './nativeGoogleAuth';
 import {
+  clearPendingMagicLinkUrl,
+  MAGIC_LINK_STATE_EVENT,
   completeMagicLinkSignIn,
   consumePendingMagicLinkUrl,
   getMagicLinkFromCurrentUrl,
@@ -54,6 +56,48 @@ const APP_TITLE = import.meta.env.VITE_APP_TITLE || 'Territórios';
 const APP_SHORT_NAME = import.meta.env.VITE_APP_SHORT_NAME || 'Territórios';
 const APP_SUBTITLE = import.meta.env.VITE_APP_SUBTITLE || '';
 const APP_ICON_192 = import.meta.env.VITE_APP_ICON_192 || './icon-192.png';
+
+function AuthStatusScreen({ message = 'Entrando...' }) {
+  return (
+    <div className="flex items-center justify-center h-[100dvh] bg-gray-100 px-6">
+      <div className="w-full max-w-sm bg-white shadow-xl rounded-2xl overflow-hidden border border-gray-200 animate-fade-in">
+        <div className="p-8 text-center">
+          <img
+            src={APP_ICON_192}
+            alt={`Logo ${APP_SHORT_NAME}`}
+            className="mx-auto mb-4 h-20 w-20 rounded-2xl shadow-sm"
+          />
+          <h2 className="text-3xl font-bold text-blue-600 mb-2">{APP_SHORT_NAME}</h2>
+          <p className="text-gray-500 mb-8">{APP_SUBTITLE || APP_TITLE}</p>
+          <div className="flex flex-col items-center gap-4">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+            <span className="text-blue-600 font-semibold text-sm animate-pulse">{message}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function useAuthSessionState() {
+  const [authState, setAuthState] = useState(() => ({
+    user: auth.currentUser,
+    loading: true
+  }));
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setAuthState({
+        user: currentUser,
+        loading: false
+      });
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  return authState;
+}
 
 const getMeusTerritoriosQuery = ({ email, contextoId }) => {
   if (isNormalContext(contextoId)) {
@@ -225,8 +269,34 @@ function Login() {
       return 'O e-mail informado parece inválido. Revise e tente novamente.';
     }
 
-    if (mensagem.includes('missing-continue-uri') || mensagem.includes('VITE_PUBLIC_APP_URL')) {
+    if (
+      mensagem.includes('missing-continue-uri')
+      || mensagem.includes('VITE_PUBLIC_APP_URL')
+      || mensagem.includes('VITE_EMAILJS_PUBLIC_KEY')
+      || mensagem.includes('VITE_EMAILJS_SERVICE_ID')
+      || mensagem.includes('VITE_EMAILJS_TEMPLATE_ID')
+    ) {
       return 'O link mágico ainda não foi configurado corretamente neste ambiente.';
+    }
+
+    if (mensagem.includes('Aguarde 1 minuto')) {
+      return 'Aguarde cerca de 1 minuto antes de pedir outro link para este e-mail.';
+    }
+
+    if (mensagem.includes('magic-link-emailjs-unavailable')) {
+      return 'O envio por e-mail ainda não foi configurado corretamente neste ambiente.';
+    }
+
+    if (mensagem.includes('The Public Key is required') || mensagem.includes('publicKey')) {
+      return 'Falta configurar a chave pública do EmailJS neste ambiente.';
+    }
+
+    if (mensagem.includes('The Service ID is required') || mensagem.includes('service ID')) {
+      return 'Falta configurar o serviço do EmailJS neste ambiente.';
+    }
+
+    if (mensagem.includes('The Template ID is required') || mensagem.includes('template ID')) {
+      return 'Falta configurar o template do EmailJS neste ambiente.';
     }
 
     if (
@@ -256,57 +326,99 @@ function Login() {
     return () => unsubscribe();
   }, [navigate]);
 
-  useEffect(() => {
-    let ativo = true;
+  const processarLinkPendente = useCallback(async () => {
+    if (auth.currentUser) return;
 
-    const processarLinkPendente = async () => {
-      if (auth.currentUser) return;
+    const linkAtual = getMagicLinkFromCurrentUrl();
+    if (linkAtual) {
+      rememberPendingMagicLinkUrl(linkAtual);
+    }
 
-      const linkPendente = consumePendingMagicLinkUrl() || getMagicLinkFromCurrentUrl();
-      if (!linkPendente) return;
+    const linkPendente = consumePendingMagicLinkUrl() || linkAtual;
+    if (!linkPendente) {
+      setMagicLinkUrl('');
+      setAguardandoConfirmacaoEmail(false);
+      return;
+    }
 
-      setMagicLinkUrl(linkPendente);
-      setErro('');
-      setInfo('');
+    setMagicLinkUrl(linkPendente);
+    setErro('');
+    setInfo('');
 
-      const emailGuardado = getRememberedMagicLinkEmail();
-      if (!emailGuardado) {
-        setAguardandoConfirmacaoEmail(true);
+    const emailGuardado = getRememberedMagicLinkEmail();
+    if (!emailGuardado) {
+      if (!linkAtual) {
+        clearPendingMagicLinkUrl();
+        setMagicLinkUrl('');
+        setAguardandoConfirmacaoEmail(false);
         setVerificandoSessao(false);
         return;
       }
 
-      setLoadingMagicLink(true);
+      setAguardandoConfirmacaoEmail(true);
+      setVerificandoSessao(false);
+      return;
+    }
 
-      try {
-        await completeMagicLinkSignIn({
-          email: emailGuardado,
-          emailLink: linkPendente
-        });
+    setAguardandoConfirmacaoEmail(false);
+    setEmail(emailGuardado);
+    setEmailConfirmacao(emailGuardado);
+    setLoadingMagicLink(true);
 
-        if (ativo) {
-          navigate('/app', { replace: true });
-        }
-      } catch (error) {
-        console.error(error);
+    try {
+      await completeMagicLinkSignIn({
+        email: emailGuardado,
+        emailLink: linkPendente
+      });
 
-        if (ativo) {
-          setErro(extrairMensagemErroMagicLink(error));
-          setVerificandoSessao(false);
-        }
-      } finally {
-        if (ativo) {
-          setLoadingMagicLink(false);
-        }
+      navigate('/app', { replace: true });
+    } catch (error) {
+      console.error(error);
+      const mensagem = String(error?.message || error || '');
+      if (
+        mensagem.includes('invalid-action-code')
+        || mensagem.includes('expired-action-code')
+        || mensagem.includes('invalid-oob-code')
+        || mensagem.includes('invalid-email-link')
+      ) {
+        clearPendingMagicLinkUrl();
+        setMagicLinkUrl('');
+        setAguardandoConfirmacaoEmail(false);
       }
+      setErro(extrairMensagemErroMagicLink(error));
+      setVerificandoSessao(false);
+    } finally {
+      setLoadingMagicLink(false);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    void processarLinkPendente();
+  }, [processarLinkPendente]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const reprocessar = () => {
+      void processarLinkPendente();
     };
 
-    void processarLinkPendente();
+    window.addEventListener(MAGIC_LINK_STATE_EVENT, reprocessar);
+    window.addEventListener('storage', reprocessar);
+    window.addEventListener('focus', reprocessar);
+    window.addEventListener('pageshow', reprocessar);
+    document.addEventListener('visibilitychange', reprocessar);
 
     return () => {
-      ativo = false;
+      window.removeEventListener(MAGIC_LINK_STATE_EVENT, reprocessar);
+      window.removeEventListener('storage', reprocessar);
+      window.removeEventListener('focus', reprocessar);
+      window.removeEventListener('pageshow', reprocessar);
+      document.removeEventListener('visibilitychange', reprocessar);
     };
-  }, [navigate]);
+  }, [processarLinkPendente]);
 
   const handleGoogleLogin = async () => {
     setLoadingGoogle(true);
@@ -345,6 +457,7 @@ function Login() {
     try {
       const normalized = await sendMagicLink(email);
       setEmail(normalized);
+      setEmailConfirmacao(normalized);
       setAguardandoConfirmacaoEmail(false);
       setInfo(`Enviamos um link de acesso para ${normalized}. Abra o e-mail, toque no link e volte para o app.`);
     } catch (error) {
@@ -382,6 +495,17 @@ function Login() {
       navigate('/app', { replace: true });
     } catch (error) {
       console.error(error);
+      const mensagem = String(error?.message || error || '');
+      if (
+        mensagem.includes('invalid-action-code')
+        || mensagem.includes('expired-action-code')
+        || mensagem.includes('invalid-oob-code')
+        || mensagem.includes('invalid-email-link')
+      ) {
+        clearPendingMagicLinkUrl();
+        setMagicLinkUrl('');
+        setAguardandoConfirmacaoEmail(false);
+      }
       setErro(extrairMensagemErroMagicLink(error));
     } finally {
       setLoadingMagicLink(false);
@@ -390,12 +514,7 @@ function Login() {
 
   if (verificandoSessao) {
     return (
-      <div className="flex items-center justify-center h-[100dvh] bg-gray-100">
-        <div className="flex flex-col items-center gap-4 animate-pulse">
-          <h2 className="text-4xl font-bold text-gray-300">Territórios</h2>
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
-      </div>
+      <AuthStatusScreen message="Entrando..." />
     );
   }
 
@@ -1995,14 +2114,8 @@ function Dashboard() {
 
   // 1. TELA DE CARREGANDO
   if (verificandoLogin || (user && verificandoBanco) || carregandoSistema) {
-    return (
-      <div className="h-[100dvh] flex items-center justify-center bg-gray-100">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
-          <span className="text-blue-600 font-semibold text-sm animate-pulse">Carregando sistema...</span>
-        </div>
-      </div>
-    );
+    const mensagem = verificandoLogin ? 'Entrando...' : 'Carregando sistema...';
+    return <AuthStatusScreen message={mensagem} />;
   }
 
   if (!user) return null;
@@ -2251,28 +2364,12 @@ function Dashboard() {
 }
 
 function RouteGuard({ children, adminOnly = false }) {
-  const [authState, setAuthState] = useState({ user: auth.currentUser, loading: !auth.currentUser });
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setAuthState({ user: currentUser, loading: false });
-    });
-
-    return () => unsubscribe();
-  }, []);
-
+  const authState = useAuthSessionState();
   const { user, loading } = authState;
   const { autorizado, isAdmin, loading: loadingUsuario } = useUsuario(user);
 
   if (loading || (user && loadingUsuario)) {
-    return (
-      <div className="h-[100dvh] flex items-center justify-center bg-gray-100">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
-          <span className="text-blue-600 font-semibold text-sm animate-pulse">Verificando acesso...</span>
-        </div>
-      </div>
-    );
+    return <AuthStatusScreen message="Verificando acesso..." />;
   }
 
   if (!user) {
@@ -2469,6 +2566,8 @@ function BackButtonExitHandler() {
 
 // --- APP PRINCIPAL ---
 function App() {
+  const { user, loading } = useAuthSessionState();
+
   return (
     <UiFeedbackProvider>
       <HashRouter>
@@ -2476,11 +2575,25 @@ function App() {
         <BackButtonExitHandler />
         <AutoUpdate />
         <Routes>
-          <Route path="/" element={<Login />} />
+          <Route
+            path="/"
+            element={
+              loading
+                ? <AuthStatusScreen message="Entrando..." />
+                : (user ? <Navigate to="/app" replace /> : <Login />)
+            }
+          />
           <Route path="/app" element={<Dashboard />} />
           <Route path="/admin" element={<RouteGuard adminOnly><LazyPage><AdminPanel /></LazyPage></RouteGuard>} />
           <Route path="/relatorios" element={<RouteGuard adminOnly><LazyPage><Relatorios /></LazyPage></RouteGuard>} />
-          <Route path="*" element={<Navigate to={auth.currentUser ? '/app' : '/'} replace />} />
+          <Route
+            path="*"
+            element={
+              loading
+                ? <AuthStatusScreen message="Entrando..." />
+                : <Navigate to={user ? '/app' : '/'} replace />
+            }
+          />
         </Routes>
       </HashRouter>
     </UiFeedbackProvider>

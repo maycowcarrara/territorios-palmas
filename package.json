@@ -1,7 +1,7 @@
 {
   "name": "territorios-palmas",
   "private": true,
-  "version": "2.6.319",
+  "version": "2.6.332",
   "type": "module",
   "scripts": {
     "dev": "node scripts/select-npm-instance.cjs dev",
@@ -88,6 +88,7 @@
     "@capacitor/push-notifications": "^7.0.6",
     "@capacitor/share": "^7.0.4",
     "@capgo/capacitor-social-login": "^7.11.2",
+    "@emailjs/browser": "^4.4.1",
     "firebase": "^12.8.0",
     "firebase-admin": "^13.9.0",
     "jspdf": "^4.0.0",

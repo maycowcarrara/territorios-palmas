@@ -26,7 +26,12 @@ function normalizeGeoData(geoData) {
 
 export function loadMapaData() {
     if (!mapaPromise) {
-        mapaPromise = loadMapDataWithOfflineCache(MAPA_URL).then(normalizeGeoData);
+        mapaPromise = loadMapDataWithOfflineCache(MAPA_URL)
+            .then(normalizeGeoData)
+            .catch((error) => {
+                mapaPromise = null;
+                throw error;
+            });
     }
 
     return mapaPromise;
