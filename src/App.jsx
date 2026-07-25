@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
-import { HashRouter, Routes, Route, useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, useNavigate, Navigate, useLocation } from './router';
 import { signInWithPopup, onAuthStateChanged } from 'firebase/auth';
 import { auth, googleProvider, db } from './firebase';
 import { arrayUnion, collection, query, where, getDocs, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firestore';

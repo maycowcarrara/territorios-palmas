@@ -51,14 +51,22 @@ async function enviarNotificacaoFinalizacao({ nome, responsavelNome, contextoSis
 }
 
 export function createDesignacaoId() {
-    return crypto.randomUUID();
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
+    }
+
+    return `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function uniqueTruthy(values) {
+    return [...new Set(values.filter(Boolean))];
 }
 
 export function buildNovoCicloTerritorio({ dadosBanco, novoNome, agora, designacaoId }) {
     if (dadosBanco.designadoPara) {
         return {
             dataInicio: dadosBanco.cicloAtual?.dataInicio || agora,
-            responsaveis: [...new Set([...(dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome]), novoNome])],
+            responsaveis: uniqueTruthy([...(dadosBanco.cicloAtual?.responsaveis || [dadosBanco.designadoNome]), novoNome]),
             designacaoId
         };
     }
@@ -81,7 +89,7 @@ export function buildHistoricoTerritorio({ dadosBanco, responsavelNome, agora })
         ...ciclo,
         designacaoId: ciclo.designacaoId || dadosBanco.designacaoId || null,
         dataTermino: agora,
-        responsaveis: [...new Set([...(ciclo.responsaveis || []), responsavelNome])]
+        responsaveis: uniqueTruthy([...(ciclo.responsaveis || []), responsavelNome])
     };
 }
 
@@ -101,15 +109,22 @@ export async function finalizarTerritorioDesignado({ salvarEstadoTerritorio, dad
         agora
     }));
 
-    await enviarNotificacaoFinalizacao({
-        nome: nomeNormalizado,
-        responsavelNome,
-        contextoSistema
-    });
+    let notificacaoEnviada = true;
+    try {
+        await enviarNotificacaoFinalizacao({
+            nome: nomeNormalizado,
+            responsavelNome,
+            contextoSistema
+        });
+    } catch (error) {
+        notificacaoEnviada = false;
+        console.error('Erro ao enviar notificação de finalização:', error);
+    }
 
     return {
         ok: true,
         responsavelNome,
-        contextoSufixo
+        contextoSufixo,
+        notificacaoEnviada
     };
 }

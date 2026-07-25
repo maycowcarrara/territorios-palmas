@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from './router';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker, Polyline } from 'react-leaflet';
 import { onSnapshot, setDoc, doc, arrayUnion, collection, getDocs, runTransaction } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
@@ -1033,8 +1033,10 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, li
             if (resultado.ok) {
                 notify({
                     title: 'Território finalizado',
-                    message: `Parabéns! Você finalizou o território${resultado.contextoSufixo}. Solicite um novo ao Servo de Territórios com antecedência. Os administradores foram notificados.`,
-                    variant: 'success',
+                    message: resultado.notificacaoEnviada
+                        ? `Parabéns! Você finalizou o território${resultado.contextoSufixo}. Solicite um novo ao Servo de Territórios com antecedência. Os administradores foram notificados.`
+                        : `Parabéns! Você finalizou o território${resultado.contextoSufixo}. A alteração foi salva, mas o aviso automático aos administradores não pôde ser enviado agora.`,
+                    variant: resultado.notificacaoEnviada ? 'success' : 'warning',
                     durationMs: 7000
                 });
             }
