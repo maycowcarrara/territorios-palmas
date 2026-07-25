@@ -20,7 +20,11 @@ export async function checkForUpdate(manual = false) {
         if (manual) {
             if ('serviceWorker' in navigator) {
                 const regs = await navigator.serviceWorker.getRegistrations();
-                await Promise.all(regs.map((registration) => registration.unregister()));
+                const appRegs = regs.filter((registration) => {
+                    const scriptUrl = registration.active?.scriptURL || registration.installing?.scriptURL || registration.waiting?.scriptURL || '';
+                    return /\/sw\.js(?:\?|$)/.test(scriptUrl);
+                });
+                await Promise.all(appRegs.map((registration) => registration.unregister()));
             }
 
             const baseUrl = import.meta.env.BASE_URL || '/';

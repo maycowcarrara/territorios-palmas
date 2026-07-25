@@ -4,7 +4,6 @@ import { Capacitor } from '@capacitor/core'
 import './index.css'
 import App from './App.jsx'
 import 'leaflet/dist/leaflet.css'
-import { MAP_DATA_CACHE_NAME, MAP_TILE_CACHE_NAME } from './mapOfflineCache'
 
 class AppErrorBoundary extends Component {
   constructor(props) {
@@ -61,46 +60,32 @@ class AppErrorBoundary extends Component {
   }
 }
 
+const limparCachesOfflineLegados = async () => {
+  if (typeof window === 'undefined' || !('caches' in window)) return
+
+  try {
+    const cacheNames = await window.caches.keys()
+    await Promise.all(
+      cacheNames
+        .filter((cacheName) => cacheName.startsWith('offline-map-'))
+        .map((cacheName) => window.caches.delete(cacheName))
+    )
+  } catch (error) {
+    console.warn('Não foi possível limpar caches offline antigos:', error)
+  }
+}
+
 const prepararServiceWorker = async () => {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
-  if (import.meta.env.DEV) {
+  await limparCachesOfflineLegados()
+
+  if (import.meta.env.DEV || Capacitor.isNativePlatform()) {
     try {
       const registrations = await navigator.serviceWorker.getRegistrations()
       await Promise.all(registrations.map((registration) => registration.unregister()))
-
-      if ('caches' in window) {
-        const cacheNames = await window.caches.keys()
-        await Promise.all(cacheNames.map((cacheName) => window.caches.delete(cacheName)))
-      }
     } catch (error) {
-      console.warn('Não foi possível limpar service workers no modo dev:', error)
-    }
-
-    return
-  }
-
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const registrations = await navigator.serviceWorker.getRegistrations()
-      await Promise.all(registrations.map((registration) => registration.unregister()))
-
-      if ('caches' in window) {
-        const cacheNames = await window.caches.keys()
-        const preservados = new Set([MAP_DATA_CACHE_NAME, MAP_TILE_CACHE_NAME])
-        await Promise.all(
-          cacheNames
-            .filter((cacheName) => !preservados.has(cacheName))
-            .map((cacheName) => window.caches.delete(cacheName))
-        )
-      }
-
-      if (registrations.length > 0 && !window.sessionStorage.getItem('native-sw-cleaned')) {
-        window.sessionStorage.setItem('native-sw-cleaned', '1')
-        window.location.reload()
-      }
-    } catch (error) {
-      console.warn('Não foi possível limpar service workers no app nativo:', error)
+      console.warn('Não foi possível limpar service workers neste ambiente:', error)
     }
 
     return

@@ -61,35 +61,6 @@ export default defineConfig(({ mode }) => {
           {
             urlPattern: ({ url }) => url.pathname.includes('version.json'),
             handler: 'NetworkOnly',
-          },
-          {
-            urlPattern: ({ url }) => /\/mapa(?:\.[^/]+)?\.json$/i.test(url.pathname),
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'offline-map-data-v1',
-              expiration: {
-                maxEntries: 4,
-                maxAgeSeconds: 30 * 24 * 60 * 60,
-              },
-            }
-          },
-          {
-            urlPattern: ({ url }) => (
-              url.hostname === 'tile.openstreetmap.org'
-              || /^[abc]\.tile\.openstreetmap\.org$/i.test(url.hostname)
-              || /^mt[0-3]\.google\.com$/i.test(url.hostname)
-            ),
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'offline-map-tiles-v1',
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-              expiration: {
-                maxEntries: 3000,
-                maxAgeSeconds: 365 * 24 * 60 * 60,
-              },
-            }
           }
         ]
       }

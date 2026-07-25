@@ -10,52 +10,7 @@ O sistema foi pensado para uso real no dia a dia:
 - administradores designam, devolvem, acompanham histórico e geram relatórios
 - observações por quadra e condomínio ficam salvas como conhecimento permanente do território
 - campanhas podem ser ativadas sem apagar o progresso normal
-- o app continua utilizável sem conexão para execução segura do território
-
-## Modo Offline Seguro
-
-O modo offline foi desenhado para permitir trabalho de campo sem abrir brecha para sobrescrever uma designação nova.
-
-### O que pode offline
-
-- marcar e desmarcar quadras
-- adicionar, editar e excluir observações
-- preparar pedido de finalização
-- confirmar finalização para concluir automaticamente quando a conexão voltar
-- consultar dados já carregados no aparelho
-
-### O que não pode offline
-
-Ações administrativas exigem conexão:
-
-- designar território
-- devolver ou liberar território
-- transferir responsável
-- finalizar ou reabrir como admin
-- criar, ativar ou excluir campanha
-- mudar usuários e permissões
-- enviar comunicados e notificações administrativas
-
-### Como a proteção funciona
-
-- cada ciclo de designação recebe um `designacaoId`
-- toda ação offline guarda `territorioId`, `userEmail`, `designacaoId`, tipo e payload
-- na sincronização, a ação só é aplicada se o servidor ainda tiver:
-  - `designadoPara === userEmail`
-  - `designacaoId === action.designacaoId`
-- se a designação mudou, a ação vira `conflict` e não é aplicada automaticamente
-
-### Fila local
-
-As ações locais ficam em uma outbox no IndexedDB com estes estados:
-
-- `pending`
-- `syncing`
-- `synced`
-- `conflict`
-- `failed`
-
-Quando o usuário está online, o app mostra uma barra discreta de salvamento abaixo do header. Quando há offline, pendências, falhas ou conflitos, o topo mostra um chip de status; ao tocar nele, o usuário vê os detalhes.
+- as alterações dependem de conexão ativa e são salvas diretamente no Firestore
 
 ## Funcionalidades
 
@@ -66,7 +21,6 @@ Quando o usuário está online, o app mostra uma barra discreta de salvamento ab
 - controle de zoom, GPS, pontos de referência e condomínios
 - marcação de quadras feitas e pendentes
 - ponto de encontro compartilhável por WhatsApp
-- status de sincronização visível no header
 
 ### Observações
 
@@ -83,7 +37,6 @@ Quando o usuário está online, o app mostra uma barra discreta de salvamento ab
 - ativação e desativação de campanhas
 - reativação de campanhas salvas
 - retorno imediato ao modo normal sem perder progresso anterior
-- ações de escrita bloqueadas enquanto o admin estiver offline
 
 ### Campanhas
 

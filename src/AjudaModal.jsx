@@ -4,7 +4,6 @@ import { buttonClass } from './uiClasses';
 
 const TABS_BASE = [
     { id: 'primeiros-passos', label: 'Primeiros passos' },
-    { id: 'offline', label: 'Offline' },
     { id: 'ferramentas', label: 'Ferramentas' },
     { id: 'documentos', label: 'Documentos' }
 ];
@@ -101,7 +100,7 @@ function InfoCard({ tone = 'gray', title, description, children }) {
     );
 }
 
-const AjudaModal = ({ isOpen, onClose, isAdmin = false }) => {
+const AjudaModal = ({ isOpen, onClose }) => {
     const tabs = useMemo(() => TABS_BASE, []);
     const [activeTab, setActiveTab] = useState(tabs[0].id);
 
@@ -224,61 +223,6 @@ const AjudaModal = ({ isOpen, onClose, isAdmin = false }) => {
                                 </div>
                                 <p className="mt-3 text-xs text-gray-600">
                                     A bolinha amarela indica que a quadra tem anotação, e isso continua visível mesmo em campanha.
-                                </p>
-                            </InfoCard>
-                        </div>
-                    ) : null}
-
-                    {activeTab === 'offline' ? (
-                        <div className="space-y-4">
-                            <InfoCard
-                                tone="sky"
-                                title="Se a internet cair"
-                                description="Você não precisa parar o trabalho no território por causa disso."
-                            >
-                                <div className="mb-3 rounded-xl border border-blue-200 bg-blue-600 p-3 text-white shadow-sm">
-                                    <p className="text-xs font-bold uppercase tracking-wide text-blue-100">Antes de sair</p>
-                                    <p className="mt-1 text-sm font-semibold">Abra a tela <strong>Mapas Offline</strong> no menu lateral e baixe a sua área com antecedência.</p>
-                                    <p className="mt-1 text-sm text-blue-50">Isso deixa o mapa preparado para uso mesmo sem sinal.</p>
-                                </div>
-                                <div className="rounded-2xl bg-white/80 p-4 space-y-2">
-                                    <p className="text-sm text-gray-700"><strong>1.</strong> Continue trabalhando normalmente no território que está com você.</p>
-                                    <p className="text-sm text-gray-700"><strong>2.</strong> Ainda é possível marcar quadras, escrever observações e concluir o território.</p>
-                                    <p className="text-sm text-gray-700"><strong>3.</strong> Toque no chip de status no topo para ver se há alterações aguardando envio.</p>
-                                    <p className="text-sm text-gray-700"><strong>4.</strong> Quando a conexão voltar, o app sincroniza sozinho.</p>
-                                </div>
-                            </InfoCard>
-
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <InfoCard
-                                    title="Como a sincronização se comporta"
-                                    description="O app protege os dados para evitar sobrescrever mudanças recentes."
-                                >
-                                    <div className="space-y-2 text-sm text-gray-700">
-                                        <p>Se o território mudou de responsável enquanto você estava offline, a alteração antiga não sobrescreve a nova designação.</p>
-                                        <p>Nesse caso, o sistema mostra conflito para revisão antes de concluir o envio.</p>
-                                        <p>Se você finalizou o território offline, a conclusão entra assim que a conexão voltar, desde que a designação continue a mesma.</p>
-                                    </div>
-                                </InfoCard>
-
-                                <InfoCard
-                                    tone="blue"
-                                    title="Mapa offline preparado"
-                                    description="Se você já baixou a área antes, a navegação fica muito mais estável quando a internet falhar."
-                                />
-                            </div>
-
-                            <InfoCard
-                                tone="amber"
-                                title="Limite para ações administrativas"
-                                description={
-                                    isAdmin
-                                        ? 'Sem conexão, ações administrativas ficam bloqueadas para evitar conflito de designações.'
-                                        : 'Se você também usa funções administrativas, saiba que elas ficam bloqueadas enquanto estiver sem conexão.'
-                                }
-                            >
-                                <p className="text-sm text-gray-700">
-                                    Offline, o admin ainda consegue consultar dados já armazenados e trabalhar normalmente apenas no território que estiver designado para ele.
                                 </p>
                             </InfoCard>
                         </div>

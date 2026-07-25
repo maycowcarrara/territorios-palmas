@@ -7,12 +7,10 @@ import { getDefaultSistemaConfig, slugifyCampanha } from './sistema';
 import { getTerritorioContextCollectionRef } from './territorioContext';
 import { useUiFeedback } from './uiFeedback';
 import { enviarComunicadoPeloRelay, relayDisponivel } from './notificationRelay';
-import { useOnlineStatus } from './useOnlineStatus';
 import { AppPage, PageHeader } from './uiPrimitives';
 import { buttonClass } from './uiClasses';
 
-const ADMIN_OFFLINE_MESSAGE = 'Você está offline. Ações administrativas precisam de conexão para evitar conflito de designações. Conecte-se para continuar.';
-const ADMIN_OFFLINE_ACTION_CLASS = 'disabled:cursor-not-allowed disabled:opacity-50';
+const DISABLED_ACTION_CLASS = 'disabled:cursor-not-allowed disabled:opacity-50';
 const ADMIN_TABS = [
     { id: 'usuarios', label: 'Usuários', icon: '👥' },
     { id: 'campanhas', label: 'Campanhas', icon: '📢' },
@@ -20,7 +18,6 @@ const ADMIN_TABS = [
 ];
 
 const AdminPanel = () => {
-    const isOnline = useOnlineStatus();
     const [usuarios, setUsuarios] = useState([]);
     const [campanhas, setCampanhas] = useState([]);
     const [campanhaTitulo, setCampanhaTitulo] = useState('');
@@ -33,18 +30,10 @@ const AdminPanel = () => {
     const [excluindoCampanha, setExcluindoCampanha] = useState(false);
     const { config: contextoSistema } = useSistema();
     const { notify, confirm } = useUiFeedback();
-    const adminActionsDisabled = !isOnline;
+    const adminActionsDisabled = false;
 
     const ensureOnlineAdminAction = () => {
-        if (isOnline) return true;
-
-        notify({
-            title: 'Administração bloqueada offline',
-            message: ADMIN_OFFLINE_MESSAGE,
-            variant: 'warning',
-            durationMs: 7000
-        });
-        return false;
+        return true;
     };
 
     // Estados para NOVO usuário
@@ -649,22 +638,12 @@ const AdminPanel = () => {
                     subtitle="Usuários, campanhas e comunicados com uma visão limpa para decisões rápidas."
                     actions={(
                         <>
-                            <div className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${isOnline ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-                                <span className={`h-2.5 w-2.5 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                                {isOnline ? 'Online' : 'Offline'}
-                            </div>
                             <Link to="/app" className={buttonClass('secondary')}>
                                 ← Voltar ao Mapa
                             </Link>
                         </>
                     )}
                 />
-
-                {!isOnline && (
-                    <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-900 shadow-sm">
-                        {ADMIN_OFFLINE_MESSAGE}
-                    </div>
-                )}
 
                 <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
                     <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -757,7 +736,7 @@ const AdminPanel = () => {
                                                         type="button"
                                                         onClick={() => mudarRole(user, 'comum')}
                                                         disabled={adminActionsDisabled}
-                                                        className={`rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-emerald-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                        className={`rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-emerald-700 ${DISABLED_ACTION_CLASS}`}
                                                     >
                                                         Aprovar agora
                                                     </button>
@@ -819,7 +798,7 @@ const AdminPanel = () => {
                                                 <button
                                                     type="submit"
                                                     disabled={loadingAdd || adminActionsDisabled}
-                                                    className={`inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-md transition-all hover:bg-blue-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                    className={`inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-md transition-all hover:bg-blue-700 ${DISABLED_ACTION_CLASS}`}
                                                 >
                                                     {loadingAdd ? 'Salvando...' : '+ Adicionar usuário'}
                                                 </button>
@@ -950,7 +929,7 @@ const AdminPanel = () => {
                                                         type="button"
                                                         onClick={salvarEdicao}
                                                         disabled={adminActionsDisabled}
-                                                        className={`flex-1 rounded-xl bg-green-600 py-2 text-sm font-bold text-white ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                        className={`flex-1 rounded-xl bg-green-600 py-2 text-sm font-bold text-white ${DISABLED_ACTION_CLASS}`}
                                                     >
                                                         Salvar
                                                     </button>
@@ -963,7 +942,7 @@ const AdminPanel = () => {
                                                             type="button"
                                                             onClick={() => mudarRole(user, 'comum')}
                                                             disabled={adminActionsDisabled}
-                                                            className={`flex-1 rounded-xl bg-green-600 py-2 text-sm font-bold text-white shadow-sm transition-transform active:scale-95 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                            className={`flex-1 rounded-xl bg-green-600 py-2 text-sm font-bold text-white shadow-sm transition-transform active:scale-95 ${DISABLED_ACTION_CLASS}`}
                                                         >
                                                             Aprovar acesso
                                                         </button>
@@ -973,7 +952,7 @@ const AdminPanel = () => {
                                                                 type="button"
                                                                 onClick={() => iniciarEdicao(user)}
                                                                 disabled={adminActionsDisabled}
-                                                                className={`flex flex-1 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2 text-blue-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                className={`flex flex-1 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2 text-blue-600 ${DISABLED_ACTION_CLASS}`}
                                                             >
                                                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
                                                             </button>
@@ -981,7 +960,7 @@ const AdminPanel = () => {
                                                                 type="button"
                                                                 onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')}
                                                                 disabled={adminActionsDisabled}
-                                                                className={`flex flex-1 items-center justify-center rounded-xl border p-2 transition-colors ${user.role === 'admin' ? 'border-red-100 bg-red-50 text-red-600' : 'border-yellow-100 bg-yellow-50 text-yellow-600'} ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                className={`flex flex-1 items-center justify-center rounded-xl border p-2 transition-colors ${user.role === 'admin' ? 'border-red-100 bg-red-50 text-red-600' : 'border-yellow-100 bg-yellow-50 text-yellow-600'} ${DISABLED_ACTION_CLASS}`}
                                                             >
                                                                 {user.role === 'admin' ? (
                                                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -1001,7 +980,7 @@ const AdminPanel = () => {
                                                         type="button"
                                                         onClick={() => remover(user.id)}
                                                         disabled={adminActionsDisabled}
-                                                        className={`flex flex-1 items-center justify-center rounded-xl border border-red-100 bg-red-50 p-2 text-red-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                        className={`flex flex-1 items-center justify-center rounded-xl border border-red-100 bg-red-50 p-2 text-red-600 ${DISABLED_ACTION_CLASS}`}
                                                     >
                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
                                                     </button>
@@ -1097,7 +1076,7 @@ const AdminPanel = () => {
                                                                         type="button"
                                                                         onClick={salvarEdicao}
                                                                         disabled={adminActionsDisabled}
-                                                                        className={`rounded-lg bg-green-100 p-2 text-green-700 transition-colors hover:bg-green-200 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                        className={`rounded-lg bg-green-100 p-2 text-green-700 transition-colors hover:bg-green-200 ${DISABLED_ACTION_CLASS}`}
                                                                         title="Salvar"
                                                                     >
                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
@@ -1113,7 +1092,7 @@ const AdminPanel = () => {
                                                                             type="button"
                                                                             onClick={() => mudarRole(user, 'comum')}
                                                                             disabled={adminActionsDisabled}
-                                                                            className={`rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all hover:bg-green-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                            className={`rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all hover:bg-green-700 ${DISABLED_ACTION_CLASS}`}
                                                                         >
                                                                             Aprovar
                                                                         </button>
@@ -1122,7 +1101,7 @@ const AdminPanel = () => {
                                                                             type="button"
                                                                             onClick={() => iniciarEdicao(user)}
                                                                             disabled={adminActionsDisabled}
-                                                                            className={`rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                            className={`rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 ${DISABLED_ACTION_CLASS}`}
                                                                             title="Editar dados"
                                                                         >
                                                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
@@ -1133,7 +1112,7 @@ const AdminPanel = () => {
                                                                         type="button"
                                                                         onClick={() => mudarRole(user, user.role === 'admin' ? 'comum' : 'admin')}
                                                                         disabled={adminActionsDisabled}
-                                                                        className={`rounded-lg p-2 transition-colors ${user.role === 'admin' ? 'text-purple-400 hover:bg-red-50 hover:text-red-600' : 'text-slate-400 hover:bg-yellow-50 hover:text-yellow-600'} ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                        className={`rounded-lg p-2 transition-colors ${user.role === 'admin' ? 'text-purple-400 hover:bg-red-50 hover:text-red-600' : 'text-slate-400 hover:bg-yellow-50 hover:text-yellow-600'} ${DISABLED_ACTION_CLASS}`}
                                                                         title={user.role === 'admin' ? 'Remover admin' : 'Promover a admin'}
                                                                     >
                                                                         {user.role === 'admin' ? (
@@ -1153,7 +1132,7 @@ const AdminPanel = () => {
                                                                         type="button"
                                                                         onClick={() => remover(user.id)}
                                                                         disabled={adminActionsDisabled}
-                                                                        className={`rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                                        className={`rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 ${DISABLED_ACTION_CLASS}`}
                                                                         title="Remover usuário"
                                                                     >
                                                                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
@@ -1192,7 +1171,7 @@ const AdminPanel = () => {
                                         type="button"
                                         onClick={voltarModoNormal}
                                         disabled={salvandoCampanha || adminActionsDisabled}
-                                        className={`rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                        className={`rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 ${DISABLED_ACTION_CLASS}`}
                                     >
                                         Desativar campanha
                                     </button>
@@ -1227,7 +1206,7 @@ const AdminPanel = () => {
                                     <button
                                         type="submit"
                                         disabled={salvandoCampanha || adminActionsDisabled}
-                                        className={`rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white transition-all hover:bg-violet-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                        className={`rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white transition-all hover:bg-violet-700 ${DISABLED_ACTION_CLASS}`}
                                     >
                                         {salvandoCampanha ? 'Salvando...' : 'Ativar'}
                                     </button>
@@ -1260,7 +1239,7 @@ const AdminPanel = () => {
                                                     type="button"
                                                     onClick={() => ativarCampanha({ id: campanha.id, titulo: campanha.titulo || campanha.id })}
                                                     disabled={salvandoCampanha || ativa || adminActionsDisabled}
-                                                    className={`w-full rounded-xl border border-violet-200 bg-white py-2 text-sm font-bold text-violet-700 hover:bg-violet-50 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                    className={`w-full rounded-xl border border-violet-200 bg-white py-2 text-sm font-bold text-violet-700 hover:bg-violet-50 ${DISABLED_ACTION_CLASS}`}
                                                 >
                                                     {ativa ? 'Campanha atual' : 'Reativar'}
                                                 </button>
@@ -1269,7 +1248,7 @@ const AdminPanel = () => {
                                                         type="button"
                                                         onClick={voltarModoNormal}
                                                         disabled={salvandoCampanha || adminActionsDisabled}
-                                                        className={`w-full rounded-xl bg-red-600 py-2 text-sm font-bold text-white hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                        className={`w-full rounded-xl bg-red-600 py-2 text-sm font-bold text-white hover:bg-red-700 ${DISABLED_ACTION_CLASS}`}
                                                     >
                                                         Desativar agora
                                                     </button>
@@ -1279,7 +1258,7 @@ const AdminPanel = () => {
                                                         type="button"
                                                         onClick={() => abrirModalExclusaoCampanha(campanha)}
                                                         disabled={salvandoCampanha || excluindoCampanha || adminActionsDisabled}
-                                                        className={`w-full rounded-xl border border-red-200 bg-white py-2 text-sm font-bold text-red-700 hover:bg-red-50 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                                        className={`w-full rounded-xl border border-red-200 bg-white py-2 text-sm font-bold text-red-700 hover:bg-red-50 ${DISABLED_ACTION_CLASS}`}
                                                     >
                                                         Excluir campanha
                                                     </button>
@@ -1348,7 +1327,7 @@ const AdminPanel = () => {
                                         <button
                                             type="submit"
                                             disabled={enviandoComunicado || totalDestinoComunicado === 0 || adminActionsDisabled}
-                                            className={`rounded-xl bg-amber-500 px-6 py-3 text-sm font-bold text-white transition-all hover:bg-amber-600 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                            className={`rounded-xl bg-amber-500 px-6 py-3 text-sm font-bold text-white transition-all hover:bg-amber-600 ${DISABLED_ACTION_CLASS}`}
                                         >
                                             {enviandoComunicado ? 'Enviando...' : 'Enviar comunicado'}
                                         </button>
@@ -1429,7 +1408,7 @@ const AdminPanel = () => {
                                     type="button"
                                     onClick={excluirCampanha}
                                     disabled={excluindoCampanha || carregandoResumoExclusao || confirmacaoExclusao.trim() !== campanhaParaExcluir.id || adminActionsDisabled}
-                                    className={`rounded-lg bg-red-600 px-4 py-2.5 font-bold text-white hover:bg-red-700 ${ADMIN_OFFLINE_ACTION_CLASS}`}
+                                    className={`rounded-lg bg-red-600 px-4 py-2.5 font-bold text-white hover:bg-red-700 ${DISABLED_ACTION_CLASS}`}
                                 >
                                     {excluindoCampanha ? 'Excluindo...' : 'Excluir definitivamente'}
                                 </button>

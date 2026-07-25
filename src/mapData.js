@@ -1,4 +1,3 @@
-import { loadMapDataWithOfflineCache } from './mapOfflineCache';
 import { normalizeTerritorioNome } from './territorioNome';
 
 let mapaPromise = null;
@@ -26,7 +25,13 @@ function normalizeGeoData(geoData) {
 
 export function loadMapaData() {
     if (!mapaPromise) {
-        mapaPromise = loadMapDataWithOfflineCache(MAPA_URL)
+        mapaPromise = fetch(MAPA_URL, { cache: 'no-store' })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`Falha ao carregar mapa: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(normalizeGeoData)
             .catch((error) => {
                 mapaPromise = null;

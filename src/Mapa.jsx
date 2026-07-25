@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapContainer, TileLayer, Polygon, Popup, CircleMarker, Tooltip, useMapEvents, useMap, Marker, Polyline } from 'react-leaflet';
-import { onSnapshot, setDoc, deleteDoc, doc, arrayUnion, collection, getDocs } from 'firebase/firestore';
+import { onSnapshot, setDoc, doc, arrayUnion, collection, getDocs, runTransaction } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { db } from './firebase';
@@ -22,12 +22,9 @@ import {
     buildHistoricoTerritorio,
     buildNovoCicloTerritorio,
     createDesignacaoId,
-    enqueueTerritorioAction,
     finalizarTerritorioDesignado
 } from './territorioActions';
 import { groupNoteDocsByQuadra, getTerritorioNotasCollectionRef, isLegacyNoteId, mergeTerritorioNotas } from './territorioNotes';
-import { reduceNotasComOutbox, reduceTerritorioComOutbox, TERRITORIO_ACTION_TYPE } from './territorioOfflineModel';
-import { getGeoJsonBounds, getMapWarmProfile, scheduleTileWarm, warmMapTilesForBounds, writeOfflineMapViewportBounds } from './mapOfflineCache';
 import { buildPublicAppRouteUrl } from './publicAppUrl';
 import { buildAppLocationUrl, buildGoogleMapsUrl, buildLocationShareText, buildWhatsAppShareUrl } from './shareLinks';
 import { extractTerritorioCodigo, normalizeTerritorioNome } from './territorioNome';
@@ -158,7 +155,7 @@ const MAP_INITIAL_CENTER = [
     getEnvNumber('VITE_MAP_CENTER_LNG', -51.995)
 ];
 const MAP_INITIAL_ZOOM = getEnvNumber('VITE_MAP_INITIAL_ZOOM', 14);
-const ADMIN_OFFLINE_MESSAGE = 'Você está offline. Ações administrativas precisam de conexão para evitar conflito de designações. Conecte-se para continuar.';
+const ASSIGNMENT_CHANGED_ERROR = 'assignment_changed';
 
 // --- DEEP LINK HANDLER ---
 const DeepLinkHandler = () => {
@@ -261,95 +258,6 @@ const ControleVisibilidade = ({ ocultarCores, setOcultarCores, mostrarDicas }) =
             </div>
         </div>
     );
-};
-
-const CacheMapaOffline = ({ geoJsonData, isOnline, tipoMapa }) => {
-    const map = useMap();
-
-    useEffect(() => {
-        if (!geoJsonData || !isOnline) return;
-
-        const bounds = getGeoJsonBounds(geoJsonData);
-        if (!bounds) return;
-
-        const profile = getMapWarmProfile();
-        return scheduleTileWarm(() => warmMapTilesForBounds({
-            bounds,
-            zooms: profile.overviewZooms,
-            layerTypes: [tipoMapa],
-            maxTilesPerZoom: Math.max(10, profile.primaryMaxTilesPerZoom - 4)
-        }), {
-            delayMs: 6000,
-            timeoutMs: 5000
-        });
-    }, [geoJsonData, isOnline, tipoMapa]);
-
-    useEffect(() => {
-        if (!isOnline) return undefined;
-
-        let timeoutId = null;
-        let cancelWarm = null;
-        let cancelSecondaryWarm = null;
-        const aquecerViewport = () => {
-            window.clearTimeout(timeoutId);
-            timeoutId = window.setTimeout(() => {
-                const profile = getMapWarmProfile();
-                const zoomAtual = Math.round(map.getZoom());
-                const bounds = map.getBounds();
-                const zooms = [...new Set([
-                    Math.max(12, zoomAtual - profile.viewportZoomOffset),
-                    Math.max(12, zoomAtual),
-                ])];
-
-                if (cancelWarm) {
-                    cancelWarm();
-                }
-
-                if (cancelSecondaryWarm) {
-                    cancelSecondaryWarm();
-                }
-
-                cancelWarm = scheduleTileWarm(() => warmMapTilesForBounds({
-                    bounds,
-                    zooms,
-                    layerTypes: [tipoMapa],
-                    maxTilesPerZoom: profile.primaryMaxTilesPerZoom
-                }), {
-                    delayMs: 1200,
-                    timeoutMs: 3500
-                });
-
-                if (profile.allowSecondaryLayers && profile.secondaryMaxTilesPerZoom > 0) {
-                    const outrosTipos = ['padrao', 'google', 'satelite'].filter((layerType) => layerType !== tipoMapa);
-                    cancelSecondaryWarm = scheduleTileWarm(() => warmMapTilesForBounds({
-                        bounds,
-                        zooms: [zoomAtual],
-                        layerTypes: outrosTipos,
-                        maxTilesPerZoom: profile.secondaryMaxTilesPerZoom
-                    }), {
-                        delayMs: 9000,
-                        timeoutMs: 5000
-                    });
-                }
-            }, 500);
-        };
-
-        aquecerViewport();
-        map.on('moveend zoomend', aquecerViewport);
-
-        return () => {
-            window.clearTimeout(timeoutId);
-            if (cancelWarm) {
-                cancelWarm();
-            }
-            if (cancelSecondaryWarm) {
-                cancelSecondaryWarm();
-            }
-            map.off('moveend zoomend', aquecerViewport);
-        };
-    }, [isOnline, map, tipoMapa]);
-
-    return null;
 };
 
 const ControlesNavegacao = ({
@@ -496,7 +404,7 @@ const ControlesNavegacao = ({
                     title: 'Permissão de localização',
                     message: isNativePlatform
                         ? 'Permita o acesso à localização do app para usar o GPS do celular.'
-                        : 'Permita o acesso à localização no navegador ou no PWA para usar sua posição no mapa.',
+                        : 'Permita o acesso à localização no navegador ou no app para usar sua posição no mapa.',
                     variant: 'warning'
                 });
                 return;
@@ -509,7 +417,7 @@ const ControlesNavegacao = ({
                     title: isNativePlatform ? 'GPS necessário' : 'Localização indisponível',
                     message: isNativePlatform
                         ? 'Ative o GPS do celular para usar a sua localização no mapa.'
-                        : 'Não foi possível obter sua localização no navegador. Verifique a permissão do site/PWA e a localização do sistema.',
+                        : 'Não foi possível obter sua localização no navegador. Verifique a permissão do site/app e a localização do sistema.',
                     variant: 'warning'
                 });
             }
@@ -966,7 +874,7 @@ const QuadraMarker = ({ quadra, isFeita, podeMarcar, podeAnotar, nota, onAbrirNo
 };
 
 // --- TERRITÓRIO DETALHADO ATUALIZADO ---
-const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, isOnline, outboxActions, listaUsuarios, ocultarCores, showRefs, showCondos, contextoSistema }) => {
+const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, listaUsuarios, ocultarCores, showRefs, showCondos, contextoSistema }) => {
     const nome = normalizeTerritorioNome(dados.properties.nome, `T-${idTerritorio}`);
     const contextoId = contextoSistema?.contextoAtivoId || 'normal';
     const contextoNormal = isNormalContext(contextoId);
@@ -1009,19 +917,18 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
         : null;
     const baseRef = useMemo(() => getTerritorioBaseRef(db, idTerritorio), [idTerritorio]);
     const stateRef = useMemo(() => getTerritorioStateRef(db, idTerritorio, contextoId), [contextoId, idTerritorio]);
-    const territorioOutboxActions = useMemo(() => outboxActions.filter((action) => action.territorioId === idTerritorio && action.contextoId === contextoId), [contextoId, idTerritorio, outboxActions]);
     const dadosBancoServidor = useMemo(() => mergeTerritorioData({
         contextoId,
         nomeFallback: nome,
         baseData: dadosBase,
         stateData: contextoNormal ? dadosBase : dadosContexto
     }), [contextoId, contextoNormal, dadosBase, dadosContexto, nome]);
-    const dadosBanco = useMemo(() => reduceTerritorioComOutbox(dadosBancoServidor, territorioOutboxActions), [dadosBancoServidor, territorioOutboxActions]);
+    const dadosBanco = dadosBancoServidor;
     const notasCombinadas = useMemo(() => mergeTerritorioNotas({
         legacyNotas: dadosBase.notas_quadras,
         noteDocs: notasDocsMap
     }), [dadosBase.notas_quadras, notasDocsMap]);
-    const notasVisiveis = useMemo(() => reduceNotasComOutbox(notasCombinadas, territorioOutboxActions, user?.email), [notasCombinadas, territorioOutboxActions, user?.email]);
+    const notasVisiveis = notasCombinadas;
 
     useEffect(() => {
         const unsubBase = onSnapshot(baseRef, (docSnapshot) => {
@@ -1069,37 +976,54 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
         }, { merge: true });
     };
 
-    const enfileirarAcaoExecucao = async (type, payload) => enqueueTerritorioAction({
-        type,
-        territorioId: idTerritorio,
-        territorioNome: nome,
-        contextoSistema,
-        userEmail: user.email,
-        designacaoId: dadosBanco.designacaoId,
-        payload: {
-            ...payload,
-            timestamp: new Date().toISOString()
+    const ensureMesmaDesignacaoServidor = (currentState) => {
+        if (isAdmin) return;
+
+        if (currentState.designadoPara !== user.email || currentState.designacaoId !== dadosBanco.designacaoId) {
+            throw new Error(ASSIGNMENT_CHANGED_ERROR);
         }
-    });
+    };
+
+    const salvarEstadoTerritorioDesignado = async (updates) => {
+        await runTransaction(db, async (transaction) => {
+            const snapshot = await transaction.get(stateRef);
+            const currentState = snapshot.exists()
+                ? snapshot.data()
+                : buildTerritorioStateSeed({ contextoId, idTerritorio, nome, contextoSistema });
+
+            ensureMesmaDesignacaoServidor(currentState);
+            transaction.set(stateRef, {
+                ...stateDocMergeSeed,
+                ...updates
+            }, { merge: true });
+        });
+    };
+
+    const notifyFalhaOperacaoTerritorio = (error, fallbackTitle) => {
+        if (String(error?.message || '') === ASSIGNMENT_CHANGED_ERROR) {
+            notify({
+                title: 'Território mudou de responsável',
+                message: 'Reabra o território para carregar a designação atual antes de continuar.',
+                variant: 'warning',
+                durationMs: 7000
+            });
+            return;
+        }
+
+        notify({
+            title: fallbackTitle,
+            message: 'Verifique sua conexão e tente novamente.',
+            variant: 'error',
+            durationMs: 7000
+        });
+    };
 
     const finalizarTerritorio = async () => {
         if (!dadosBanco.designadoPara) return;
         try {
             setLoadingAction(true);
-            if (!isOnline) {
-                await enfileirarAcaoExecucao(TERRITORIO_ACTION_TYPE.FINALIZATION_CONFIRM, {
-                    responsavelNome: dadosBanco.designadoNome || user.displayName || user.email.split('@')[0]
-                });
-                notify({
-                    title: 'Finalização preparada',
-                    message: 'Você está offline. A finalização ficou salva e será concluída automaticamente quando a conexão voltar.',
-                    variant: 'info',
-                    durationMs: 7000
-                });
-                return;
-            }
             const resultado = await finalizarTerritorioDesignado({
-                salvarEstadoTerritorio,
+                salvarEstadoTerritorio: salvarEstadoTerritorioDesignado,
                 dadosBanco,
                 nome,
                 db,
@@ -1114,7 +1038,10 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                     durationMs: 7000
                 });
             }
-        } catch (error) { console.error(error); }
+        } catch (error) {
+            console.error(error);
+            notifyFalhaOperacaoTerritorio(error, 'Finalização não salva');
+        }
         finally {
             setLoadingAction(false);
         }
@@ -1128,72 +1055,90 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
     const recusarFinalizacao = async () => {
         try {
             setLoadingAction(true);
-            await enfileirarAcaoExecucao(TERRITORIO_ACTION_TYPE.FINALIZATION_REQUEST, {});
+            await salvarEstadoTerritorioDesignado({
+                status: TERRITORIO_STATUS.AGUARDANDO_FINALIZACAO,
+                ultimaAlteracao: new Date()
+            });
             setConfirmacaoFinalizacaoAberta(false);
             notify({
-                title: isOnline ? 'Solicitação de finalização preparada' : 'Solicitação salva offline',
-                message: isOnline
-                    ? 'Tudo certo. O território continua com você e ficará como 100% concluído, aguardando sua confirmação final.'
-                    : 'Tudo certo. O território ficará marcado como aguardando finalização quando a conexão voltar.',
+                title: 'Solicitação de finalização preparada',
+                message: 'Tudo certo. O território continua com você e ficará como 100% concluído, aguardando sua confirmação final.',
                 variant: 'info'
             });
+        } catch (error) {
+            console.error(error);
+            notifyFalhaOperacaoTerritorio(error, 'Solicitação não salva');
         } finally {
             setLoadingAction(false);
         }
     };
 
-    const alternarQuadra = async (quadraId, jaFeita) => {
-        if (isAdmin && isOnline && !isMeu) {
-            const quadrasFeitas = Array.isArray(dadosBanco.quadras_feitas) ? dadosBanco.quadras_feitas : [];
-            const proximasQuadras = !jaFeita
-                ? [...new Set([...quadrasFeitas, quadraId])]
-                : quadrasFeitas.filter((item) => item !== quadraId);
+    const alternarQuadra = async (quadraId) => {
+        try {
+            const resultadoQuadras = await runTransaction(db, async (transaction) => {
+                const snapshot = await transaction.get(stateRef);
+                const currentState = snapshot.exists()
+                    ? snapshot.data()
+                    : buildTerritorioStateSeed({ contextoId, idTerritorio, nome, contextoSistema });
+                ensureMesmaDesignacaoServidor(currentState);
 
-            await salvarEstadoTerritorio({
-                quadras_feitas: proximasQuadras,
-                status: TERRITORIO_STATUS.ABERTO,
-                ultimaAlteracao: new Date()
+                const quadrasFeitas = Array.isArray(currentState.quadras_feitas) ? currentState.quadras_feitas : [];
+                const marcouQuadra = !quadrasFeitas.includes(quadraId);
+                const quadrasAtualizadas = marcouQuadra
+                    ? [...new Set([...quadrasFeitas, quadraId])]
+                    : quadrasFeitas.filter((item) => item !== quadraId);
+
+                transaction.set(stateRef, {
+                    ...stateDocMergeSeed,
+                    quadras_feitas: quadrasAtualizadas,
+                    status: TERRITORIO_STATUS.ABERTO,
+                    ultimaAlteracao: new Date()
+                }, { merge: true });
+
+                return {
+                    marcouQuadra,
+                    quadrasAtualizadas
+                };
             });
-            return;
-        }
 
-        await enfileirarAcaoExecucao(TERRITORIO_ACTION_TYPE.TOGGLE_QUADRA, {
-            quadraId,
-            marcar: !jaFeita
-        });
-
-        if (!jaFeita && feitas + 1 === total) {
-            setConfirmacaoFinalizacaoAberta(true);
+            if (resultadoQuadras.marcouQuadra && resultadoQuadras.quadrasAtualizadas.length === total) {
+                setConfirmacaoFinalizacaoAberta(true);
+            }
+        } catch (error) {
+            console.error(error);
+            notifyFalhaOperacaoTerritorio(error, 'Marcação não salva');
         }
     };
 
     const adicionarNota = async (quadraId, texto) => {
-        if (adminModerandoOutroTerritorio) {
+        try {
             const noteRef = doc(getTerritorioNotasCollectionRef(baseRef));
-            await setDoc(noteRef, {
-                quadraId,
-                texto,
-                autorEmail: user.email,
-                autorNome: user.displayName || user.email.split('@')[0],
-                data: new Date().toISOString(),
-                designacaoId: dadosBanco.designacaoId || null,
-                territorioId: idTerritorio,
-                contextoId
-            });
-            await setDoc(baseRef, {
-                nome,
-                ultimaAlteracao: new Date()
-            }, { merge: true });
-            return;
-        }
+            await runTransaction(db, async (transaction) => {
+                const snapshot = await transaction.get(stateRef);
+                const currentState = snapshot.exists()
+                    ? snapshot.data()
+                    : buildTerritorioStateSeed({ contextoId, idTerritorio, nome, contextoSistema });
+                ensureMesmaDesignacaoServidor(currentState);
 
-        await enfileirarAcaoExecucao(TERRITORIO_ACTION_TYPE.ADD_NOTE, {
-            quadraId,
-            noteId: crypto.randomUUID(),
-            texto,
-            autorNome: user.displayName || user.email.split('@')[0],
-            data: new Date().toISOString()
-        });
+                transaction.set(noteRef, {
+                    quadraId,
+                    texto,
+                    autorEmail: user.email,
+                    autorNome: user.displayName || user.email.split('@')[0],
+                    data: new Date().toISOString(),
+                    designacaoId: currentState.designacaoId || dadosBanco.designacaoId || null,
+                    territorioId: idTerritorio,
+                    contextoId
+                });
+                transaction.set(baseRef, {
+                    nome,
+                    ultimaAlteracao: new Date()
+                }, { merge: true });
+            });
+        } catch (error) {
+            console.error(error);
+            notifyFalhaOperacaoTerritorio(error, 'Observação não salva');
+        }
     };
 
     const editarNota = async (quadraId, noteId, novoTexto) => {
@@ -1206,25 +1151,33 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
             return;
         }
 
-        if (adminModerandoOutroTerritorio) {
+        try {
             const noteRef = doc(getTerritorioNotasCollectionRef(baseRef), noteId);
-            await setDoc(noteRef, {
-                texto: novoTexto,
-                editadoEm: new Date().toISOString()
-            }, { merge: true });
-            await setDoc(baseRef, {
-                nome,
-                ultimaAlteracao: new Date()
-            }, { merge: true });
-            return;
-        }
+            await runTransaction(db, async (transaction) => {
+                const stateSnapshot = await transaction.get(stateRef);
+                const currentState = stateSnapshot.exists()
+                    ? stateSnapshot.data()
+                    : buildTerritorioStateSeed({ contextoId, idTerritorio, nome, contextoSistema });
+                ensureMesmaDesignacaoServidor(currentState);
 
-        await enfileirarAcaoExecucao(TERRITORIO_ACTION_TYPE.EDIT_NOTE, {
-            quadraId,
-            noteId,
-            texto: novoTexto,
-            editadoEm: new Date().toISOString()
-        });
+                const noteSnapshot = await transaction.get(noteRef);
+                if (!noteSnapshot.exists()) {
+                    throw new Error('note_not_found');
+                }
+
+                transaction.set(noteRef, {
+                    texto: novoTexto,
+                    editadoEm: new Date().toISOString()
+                }, { merge: true });
+                transaction.set(baseRef, {
+                    nome,
+                    ultimaAlteracao: new Date()
+                }, { merge: true });
+            });
+        } catch (error) {
+            console.error(error);
+            notifyFalhaOperacaoTerritorio(error, 'Observação não atualizada');
+        }
     };
 
     const removerNota = async (quadraId, noteId) => {
@@ -1244,19 +1197,25 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
             return;
         }
 
-        if (adminModerandoOutroTerritorio) {
-            await deleteDoc(doc(getTerritorioNotasCollectionRef(baseRef), noteId));
-            await setDoc(baseRef, {
-                nome,
-                ultimaAlteracao: new Date()
-            }, { merge: true });
-            return;
-        }
+        try {
+            const noteRef = doc(getTerritorioNotasCollectionRef(baseRef), noteId);
+            await runTransaction(db, async (transaction) => {
+                const stateSnapshot = await transaction.get(stateRef);
+                const currentState = stateSnapshot.exists()
+                    ? stateSnapshot.data()
+                    : buildTerritorioStateSeed({ contextoId, idTerritorio, nome, contextoSistema });
+                ensureMesmaDesignacaoServidor(currentState);
 
-        await enfileirarAcaoExecucao(TERRITORIO_ACTION_TYPE.DELETE_NOTE, {
-            quadraId,
-            noteId
-        });
+                transaction.delete(noteRef);
+                transaction.set(baseRef, {
+                    nome,
+                    ultimaAlteracao: new Date()
+                }, { merge: true });
+            });
+        } catch (error) {
+            console.error(error);
+            notifyFalhaOperacaoTerritorio(error, 'Observação não excluída');
+        }
     };
 
     const abrirModalNota = (quadraId, notasAtuais) => {
@@ -1271,10 +1230,9 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
     const donoDoTerritorio = dadosBanco.designadoPara;
     const isMeu = donoDoTerritorio === usuarioAtual;
     const isOcupado = donoDoTerritorio && !isMeu;
-    const adminExecutandoOutroTerritorio = isAdmin && isOnline && !isMeu;
+    const adminExecutandoOutroTerritorio = isAdmin && !isMeu;
     const podeMarcarQuadra = isMeu || adminExecutandoOutroTerritorio;
-    const podeAnotar = isMeu || (isAdmin && isOnline);
-    const adminModerandoOutroTerritorio = adminExecutandoOutroTerritorio;
+    const podeAnotar = isMeu || isAdmin;
     const total = listaQuadras.length;
     const progressoTerritorio = getTerritorioProgresso(dadosBanco, total);
     const isFinalizado = progressoTerritorio.isFinalizado;
@@ -1377,16 +1335,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
     };
 
     const salvarDesignacao = async () => {
-        if (!isOnline) {
-            notify({
-                title: 'Administração bloqueada offline',
-                message: ADMIN_OFFLINE_MESSAGE,
-                variant: 'warning',
-                durationMs: 7000
-            });
-            return;
-        }
-
         setLoadingAction(true);
 
         try {
@@ -1486,16 +1434,6 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
     };
 
     const disponibilizarNovamente = async () => {
-        if (!isOnline) {
-            notify({
-                title: 'Administração bloqueada offline',
-                message: ADMIN_OFFLINE_MESSAGE,
-                variant: 'warning',
-                durationMs: 7000
-            });
-            return;
-        }
-
         if (!(await confirm({
             title: 'Disponibilizar novamente',
             message: 'Remover o status de finalizado e deixar este território disponível novamente?',
@@ -1540,12 +1478,10 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
 
     const compartilharPontoEncontro = () => {
         const p = posicaoClique || centro;
-        const appUrl = buildAppLocationUrl(p.lat, p.lng, 17);
         const mapsUrl = buildGoogleMapsUrl(p.lat, p.lng);
         const text = buildLocationShareText({
             title: 'Ponto de Encontro',
             territoryName: nome,
-            appUrl,
             mapsUrl
         });
 
@@ -1589,7 +1525,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                                 disabled={loadingAction}
                                 className={`popup-btn-action mb-3 text-white ${loadingAction ? 'bg-emerald-400 cursor-wait' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                             >
-                                {loadingAction ? 'Processando...' : isOnline ? 'Confirmar Finalização' : 'Preparar Finalização'}
+                                {loadingAction ? 'Processando...' : 'Confirmar Finalização'}
                             </button>
                         )}
                         {isAdmin ? (
@@ -1617,23 +1553,18 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                                                 </span>
                                             )}
                                         </div>
-                                        {!isOnline && (
-                                            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                                                {ADMIN_OFFLINE_MESSAGE}
-                                            </div>
-                                        )}
                                         <select
                                             className="w-full p-2 mb-2 text-sm bg-white border border-gray-300 rounded outline-none disabled:bg-gray-100 disabled:text-gray-400"
                                             value={usuarioSelecionado}
                                             onChange={(e) => setUsuarioSelecionado(e.target.value)}
-                                            disabled={loadingAction || !isOnline}
+                                            disabled={loadingAction}
                                         >
                                             <option value="">-- Devolver / Livre --</option>
                                             {listaUsuarios.map(u => <option key={u.email} value={u.email} className={u.email === user.email ? "font-bold text-blue-600" : ""}>{u.nome}</option>)}
                                         </select>
                                         <button
                                             onClick={salvarDesignacao}
-                                            disabled={(!dadosBanco.designadoPara && !usuarioSelecionado) || loadingAction || !isOnline}
+                                            disabled={(!dadosBanco.designadoPara && !usuarioSelecionado) || loadingAction}
                                             className={`popup-btn-action text-white mb-2 ${loadingAction ? 'bg-slate-400 cursor-wait' :
                                                 (!dadosBanco.designadoPara && !usuarioSelecionado ? 'bg-gray-300' : !usuarioSelecionado ? 'bg-red-500' : 'bg-blue-600')
                                                 }`}
@@ -1651,7 +1582,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                                             )}
                                         </button>
                                         {isFinalizado && !dadosBanco.designadoPara && (
-                                            <button onClick={disponibilizarNovamente} disabled={loadingAction || !isOnline} className="popup-btn-action bg-amber-50 border border-amber-300 text-amber-700 hover:bg-amber-100 mt-2 disabled:opacity-50">
+                                            <button onClick={disponibilizarNovamente} disabled={loadingAction} className="popup-btn-action bg-amber-50 border border-amber-300 text-amber-700 hover:bg-amber-100 mt-2 disabled:opacity-50">
                                                 Disponibilizar Novamente
                                             </button>
                                         )}
@@ -1746,7 +1677,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
                     notas: notasVisiveis?.[modalConfig.dados.quadraId]
                 } : null}
                 user={user}
-                isAdmin={isAdmin && isOnline}
+                isAdmin={isAdmin}
                 canWrite={podeAnotar}
                 onClose={fecharModal}
                 onAdicionar={adicionarNota}
@@ -1765,7 +1696,7 @@ const TerritorioDetalhado = ({ dados, idTerritorio, zoomLevel, user, isAdmin, is
 };
 
 // --- MAPA PRINCIPAL ---
-const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
+const Mapa = ({ user, isAdmin, contextoSistema }) => {
     const [geoJsonData, setGeoJsonData] = useState(null);
     const [mapaErro, setMapaErro] = useState('');
     const [zoomLevel, setZoomLevel] = useState(MAP_INITIAL_ZOOM);
@@ -1840,16 +1771,8 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
         const map = useMapEvents({
             zoomend: () => {
                 setZoomLevel(map.getZoom());
-                writeOfflineMapViewportBounds(map.getBounds());
-            },
-            moveend: () => {
-                writeOfflineMapViewportBounds(map.getBounds());
             }
         });
-
-        useEffect(() => {
-            writeOfflineMapViewportBounds(map.getBounds());
-        }, [map]);
 
         return null;
     };
@@ -1874,7 +1797,6 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
                 <MapContainer center={MAP_INITIAL_CENTER} zoom={MAP_INITIAL_ZOOM} maxZoom={22} zoomControl={false} className="h-full w-full z-0">
                     <MapEvents />
                     <DeepLinkHandler />
-                    <CacheMapaOffline geoJsonData={geoJsonData} isOnline={isOnline} tipoMapa={tipoMapa} />
                     {tipoMapa === 'padrao' && <TileLayer attribution='© OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxNativeZoom={19} maxZoom={22} />}
                     {tipoMapa === 'google' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
                     {tipoMapa === 'satelite' && <TileLayer attribution='© Google Maps' url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}" maxNativeZoom={20} maxZoom={22} />}
@@ -1915,8 +1837,6 @@ const Mapa = ({ user, isAdmin, contextoSistema, isOnline, outboxActions }) => {
                                 zoomLevel={zoomLevel}
                                 user={user}
                                 isAdmin={isAdmin}
-                                isOnline={isOnline}
-                                outboxActions={outboxActions}
                                 listaUsuarios={listaUsuarios}
                                 ocultarCores={ocultarCores}
                                 showRefs={showRefs}
